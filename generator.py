@@ -29,9 +29,10 @@ logger = logging.getLogger(__name__)
 
 _ANSWER_PROMPT_TEMPLATE = """\
 당신은 약법 및 전문 지침을 준수하며 오직 공식 데이터에만 근거하여 답변하는 **전문 약사 AI**입니다.
+말투는 환자 입장에서 이해하기 쉬운 **친절하고 공감적인 한국어**를 사용하되, 사실/근거는 엄격히 지키십시오.
 
 ━━━ 🚨 엄격 준수 규칙 (절대적) ━━━
-1. **데이터 중심 답변**: 반드시 아래 [검색된 문서]에 명시된 내용만 사용하여 답변하십시오. 문서에 없는 내용은 "제공된 문서에 해당 정보가 없습니다."라고 답하십시오.
+1. **데이터 중심 답변**: 반드시 아래 [검색된 문서]에 명시된 내용만 사용하여 답변하십시오. 문서에 없는 내용은 "제공된 문서에 해당 정보가 없습니다."를 포함해 명확히 알리고, 이어서 **약효/성분 추측 없이** 일반적 관리 팁 또는 추가 질문 유도 문장을 1~3줄 덧붙일 수 있습니다.
 2. **환자 안전 최우선**: 문서에 부작용이나 주의사항이 있다면 반드시 포함하십시오. 일반적인 상식(예: "미지근한 물과 복용")은 조언으로 덧붙일 수 있으나, 약효나 성분에 대한 추측은 절대 금지입니다.
 3. **출처 표기 (필수)**: 정보를 가져온 문장 끝에 반드시 **[문서 N]** 표기를 붙이십시오 (예: ...입니다. [문서 1]).
 4. **허구 인용 금지**: 문서에 없는 내용을 적으면서 허위로 [문서 N] 표기를 붙이는 행위는 허용되지 않습니다.
@@ -93,7 +94,7 @@ _OPTIMIZER_PROMPT_TEMPLATE = """\
 위의 실패 원인과 지표를 분석하여, 다음 라운드에서 더 정확한 답변을 생성할 수 있도록 수정된 프롬프트 템플릿을 만드십시오.
 - [검색된 문서]의 데이터를 더 정확하게 인용하고 추측을 배제하도록 지시를 강화하세요.
 - 필요하다면 출력 형식이나 주의사항을 구체적으로 조정하세요.
-- 반드시 {{context}}와 {{question}} 변수를 포함한 전체 프롬프트 전문만 출력하세요."""
+- 반드시 {context}와 {question} 변수를 포함한 전체 프롬프트 전문만 출력하세요."""
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -338,7 +339,9 @@ async def self_correction_loop(
     ]
 
     for round_num in range(1, max_rounds + 1):
-        if "PASS" in last_verify_result.upper():
+        # "FAIL"이 없고 "PASS"만 있거나, [최종 판정]이 PASS이면 종료
+        u_verify = last_verify_result.upper()
+        if "FAIL" not in u_verify or "[최종 판정]: PASS" in u_verify:
             break
 
         # 1. 프롬프트 최적화 (GPT-5.2 사용)
@@ -401,11 +404,20 @@ async def self_correction_loop(
             "prompt_template": current_template,
         })
 
-    # 최종 결과 요약 전달
+    # 교정 실제 수행 횟수 계산
+    # FAIL로 시작해서 PASS로 끝났으면 loop가 돌았음.
+    actual_rounds = round_num - 1
+    if "PASS" in last_verify_result.upper() and actual_rounds == 0 and "FAIL" in initial_verify_result.upper():
+        # 이 경우는 이론상 1회는 돌아야 함 (최소 1회 진입 후 PASS가 되었으므로)
+        actual_rounds = 1
+    
+    # 더 정확한 계산: logs 길이를 활용 (초기 로그 1개 + 라운드별 1개)
+    actual_rounds = len(correction_logs) - 1
+
     yield ("done_loop", {
         "answer": current_answer,
         "verify_result": last_verify_result,
-        "rounds": round_num if "PASS" not in last_verify_result.upper() else round_num - 1,
+        "rounds": actual_rounds,
         "logs": correction_logs,
         "ragas": last_ragas_result
     })

@@ -32,7 +32,7 @@ from retriever import (
     get_ensemble_results,
     load_embeddings,
     load_reranker,
-    load_vector_db,
+    load_vector_db_with_embeddings,
     rerank_docs,
 )
 from generator import (
@@ -149,7 +149,7 @@ def _run_round_1(
     query = case["query"]
 
     t0 = time.time()
-    ensemble_docs = get_ensemble_results(
+    ensemble_docs, search_breakdown = get_ensemble_results(
         query=query,
         kiwi=resources["kiwi"],
         bm25_retriever=resources["bm25"],
@@ -158,16 +158,18 @@ def _run_round_1(
         k=ensemble_k,
         weight_bm25=weight_bm25,
         weight_vector=round(1.0 - weight_bm25, 2),
+        return_metrics=True,
     )
     search_s = time.time() - t0
 
     t1 = time.time()
-    ranked_pairs = rerank_docs(
+    ranked_pairs, rerank_breakdown = rerank_docs(
         query=query,
         docs=ensemble_docs,
         reranker=resources["reranker"],
         top_k=top_k,
         batch_size=rerank_batch_size,
+        return_metrics=True,
     )
     rerank_s = time.time() - t1
 
@@ -269,6 +271,8 @@ def _run_round_1(
             "top_relevance": round(top_relevance, 4),
             "oos_min_top_score": round(oos_min_top_score, 4),
             "oos_guard": is_oos_guarded,
+            **{k: round(float(v), 3) for k, v in search_breakdown.items()},
+            **{k: round(float(v), 3) for k, v in rerank_breakdown.items()},
         },
     }
 
@@ -447,9 +451,9 @@ def main() -> None:
 
     print("[INIT] 리소스 로딩 중...")
     embeddings = load_embeddings()
-    vector_db = load_vector_db(args.db_path)
+    vector_db = load_vector_db_with_embeddings(args.db_path, embeddings)
     reranker = load_reranker()
-    bm25, kiwi = build_bm25_retriever(args.db_path)
+    bm25, kiwi = build_bm25_retriever(vector_db=vector_db)
     query_optimizer = get_query_optimizer(openai_api_key)
     resources = {
         "embeddings": embeddings,
