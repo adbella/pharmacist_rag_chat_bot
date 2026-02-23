@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>💊 약사 AI — Pharmacist RAG</title>
+  <meta name="description" content="약학 및 건강기능식품 전문 AI 챗봇. RAG 기반 근거 중심 답변." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Pretendard:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style_v31.css" />
+</head>
+
+<body>
+  <div class="bg-blur bg-blur-1" aria-hidden="true"></div>
+  <div class="bg-blur bg-blur-2" aria-hidden="true"></div>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <!-- ═══════════════════════════════════════════════════════ INIT OVERLAY ══ -->
+  <div id="initOverlay" class="init-overlay">
+    <div class="init-content">
+      <div class="init-pill">💊</div>
+      <h2 class="init-title">약사 AI 준비 중</h2>
+      <p class="init-sub">임베딩 모델 및 의약품 데이터베이스를 로드하고 있습니다.</p>
+      <div class="init-status">
+        <div class="status-spinner"></div>
+        <span id="initStatusText">서버 연결 확인 중...</span>
+      </div>
+      <div id="initLogs" class="init-logs"></div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════ PERFORMANCE OVERLAY ══ -->
+  <div id="metricsOverlay" class="metrics-overlay hidden" aria-live="polite">
+    <div class="metrics-overlay-card">
+      <div class="metrics-pill-wrap">
+        <span class="metrics-pill metrics-pill-spin">💊</span>
+      </div>
+      <div class="metrics-overlay-title">잠시만 기다려주세요 💙</div>
+      <div id="metricsOverlayText" class="metrics-overlay-sub">작업을 준비하고 있어요…</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ LAYOUT ═══ -->
+  <div class="app-shell">
+
+    <!-- ────────────────────── SIDEBAR ────────────────────── -->
+    <aside class="sidebar" id="sidebar">
+
+      <!-- Logo -->
+      <div class="sidebar-logo">
+        <div class="logo-pill">
+          <span class="logo-icon">💊</span>
+          <div>
+            <div class="logo-name">약사 AI <span
+                style="font-size: 0.6em; background: var(--blue-muted); color: var(--blue); padding: 2px 6px; border-radius: 4px; margin-left: 4px;">v3.1</span>
+            </div>
+            <div class="logo-sub">Pharmacist RAG Engine</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VRAM Widget -->
+      <div class="vram-card" id="vramCard">
+        <div class="vram-header">
+          <span class="vram-dot" id="vramDot"></span>
+          <span class="vram-label" id="vramLabel">GPU 확인 중...</span>
+          <button class="btn-icon-sm" id="clearVramBtn" onclick="clearMemory()" title="GPU 메모리 정리">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          </button>
+        </div>
+        <div class="vram-bar-wrap">
+          <div class="vram-bar-fill" id="vramFill" style="width:0%"></div>
+        </div>
+        <div class="vram-stats" id="vramStats"></div>
+        <div class="external-api-status" id="externalApiStatus">🌐 외부 API 상태: 확인 중...</div>
+        <div style="font-size: 0.6rem; color: var(--text-muted); margin-top: 4px; line-height: 1.2;">
+          * 약 2GB는 AI 모델 구동을 위한 기본 점유량이며 정리할 수 없습니다.
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Model -->
+      <div class="control-group">
+        <label class="control-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 2v3m0 14v3M2 12h3m14 0h3m-3.3-8.7-2.1 2.1m-8.4 8.4-2.1 2.1m0-12.6 2.1 2.1m8.4 8.4 2.1 2.1" />
+          </svg>
+          GPT 모델
+        </label>
+        <div class="select-wrap">
+          <select id="modelSelect" class="control-select">
+            <option value="gpt-5" selected>GPT-5 (Pharmacist Special)</option>
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+          </select>
+          <svg class="select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Ensemble Weights -->
+      <div class="control-group">
+        <label class="control-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+          </svg>
+          앙상블 가중치
+        </label>
+        <div class="slider-row">
+          <span class="slider-tag bm25-tag">BM25</span>
+          <input type="range" id="bm25Slider" class="slider" min="0" max="100" value="80" />
+          <span class="slider-val" id="bm25Val">0.80</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-tag vec-tag">벡터</span>
+          <div class="slider-static-bar">
+            <div class="slider-static-fill" id="vecFill" style="width:20%"></div>
+          </div>
+          <span class="slider-val" id="vecVal">0.20</span>
+        </div>
+      </div>
+
+      <!-- Top-K -->
+      <div class="control-group">
+        <label class="control-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 3h18M3 9h18M3 15h12M3 21h8" />
+          </svg>
+          Top-K 문서 수
+        </label>
+        <div class="slider-row">
+          <input type="range" id="topkSlider" class="slider" min="3" max="10" value="5" />
+          <span class="slider-val" id="topkVal">5</span>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Advanced -->
+      <div class="control-group" id="selfCorrGroup">
+        <label class="control-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+          </svg>
+          고급 옵션
+        </label>
+        <div class="toggle-row" id="selfCorrToggle" onclick="toggleSelfCorr()">
+          <div class="toggle-info">
+            <div class="toggle-name">🔄 자기 교정 루프</div>
+            <div class="toggle-desc">FAIL 시 최대 3회 재시도</div>
+          </div>
+          <div class="toggle-switch active" id="selfCorrSwitch"></div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- RAGAS Metrics -->
+      <div class="control-group">
+        <label class="control-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20V10M18 20V4M6 20v-4" />
+          </svg>
+          최근 RAG 성능 지표
+        </label>
+        <div class="ragas-metric">
+          <div class="ragas-label">
+            <span>신뢰성 (Faithfulness)</span>
+            <span id="valFaithfulness" class="ragas-val">0.00</span>
+          </div>
+          <div class="ragas-bar-bg">
+            <div id="barFaithfulness" class="ragas-bar-fill"></div>
+          </div>
+        </div>
+        <div class="ragas-metric">
+          <div class="ragas-label">
+            <span>답변 관련성 (Relevancy)</span>
+            <span id="valRelevancy" class="ragas-val">0.00</span>
+          </div>
+          <div class="ragas-bar-bg">
+            <div id="barRelevancy" class="ragas-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Example Questions -->
+      <div class="control-group">
+        <label class="control-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <path d="M12 17h.01" />
+          </svg>
+          예시 질문
+        </label>
+        <div class="example-pills" id="examplePills"></div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Clear -->
+      <button class="btn-clear" id="clearBtn" onclick="clearChat()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6M14 11v6" />
+        </svg>
+        대화 초기화
+      </button>
+
+    </aside>
+
+    <!-- ──────────────────────── MAIN AREA ─────────────────── -->
+    <main class="main">
+
+      <!-- Topbar -->
+      <header class="topbar">
+        <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="메뉴">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <div class="topbar-brand">
+          <span class="topbar-icon">💊</span>
+          <span class="topbar-title">약사 AI 챗봇</span>
+          <span class="topbar-context">실시간 근거 기반 답변</span>
+        </div>
+        <div class="topbar-badges">
+          <span class="badge badge-green">BGE-M3-ko</span>
+          <span class="badge badge-blue">BM25+벡터</span>
+          <span class="badge badge-purple">CrossEncoder</span>
+        </div>
+      </header>
+
+      <!-- Chat area -->
+      <div class="chat-area" id="chatArea">
+
+        <!-- Empty state -->
+        <div class="empty-state" id="emptyState">
+          <div class="empty-hero">
+            <div class="empty-icon-wrap">
+              <span class="empty-icon">💊</span>
+            </div>
+            <h1 class="empty-title">약사 AI에게 물어보세요</h1>
+            <p class="empty-sub">외부 의약품 데이터베이스 기반 RAG 시스템<br />근거 중심 · 출처 표기 · 자기 검증</p>
+            <div class="trust-strip">
+              <div class="trust-chip">📚 출처 기반 문서 검색</div>
+              <div class="trust-chip">🛡️ 답변 자기 검증</div>
+              <div class="trust-chip">⚕️ 약학 특화 질의응답</div>
+            </div>
+            <div class="feature-chips">
+              <div class="feature-chip">
+                <span class="chip-icon">🔍</span>
+                <div>
+                  <div class="chip-name">앙상블 검색</div>
+                  <div class="chip-desc">BM25 + 벡터 RRF</div>
+                </div>
+              </div>
+              <div class="feature-chip">
+                <span class="chip-icon">⚡</span>
+                <div>
+                  <div class="chip-name">CrossEncoder 리랭킹</div>
+                  <div class="chip-desc">정밀 관련도 정렬</div>
+                </div>
+              </div>
+              <div class="feature-chip">
+                <span class="chip-icon">🧐</span>
+                <div>
+                  <div class="chip-name">GPT 자기 검증</div>
+                  <div class="chip-desc">PASS / FAIL 판정</div>
+                </div>
+              </div>
+              <div class="feature-chip">
+                <span class="chip-icon">🔄</span>
+                <div>
+                  <div class="chip-name">자기 교정 루프</div>
+                  <div class="chip-desc">최대 3회 재시도</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="messages" id="messages"></div>
+
+      </div>
+
+      <!-- Input area -->
+      <div class="input-area">
+        <div class="input-wrap">
+          <textarea id="queryInput" class="query-input" placeholder="약에 대해 궁금한 것을 물어보세요… (예: 눈이 침침한데 뭐 먹으면 될까요?)"
+            rows="1"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+            <svg id="sendIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+            <svg id="stopIcon" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+        </div>
+        <div class="input-footer">
+          <span class="input-hint">Enter로 전송 · Shift+Enter로 줄바꿈</span>
+          <span class="status-text" id="statusText"></span>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════ MESSAGE TEMPLATE ═ -->
+  <template id="msgUserTpl">
+    <div class="msg msg-user">
+      <div class="msg-avatar msg-avatar-user">나</div>
+      <div class="msg-bubble msg-bubble-user"></div>
+    </div>
+  </template>
+
+  <template id="msgAiTpl">
+    <div class="msg msg-ai">
+      <div class="msg-avatar msg-avatar-ai">AI</div>
+      <div class="msg-content">
+        <div class="msg-bubble msg-bubble-ai">
+          <div class="msg-text"></div>
+          <div class="msg-step-indicator hidden">
+            <div class="status-spinner-sm"></div>
+            <span class="msg-step-text"></span>
+          </div>
+          <div class="thinking-dots hidden">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+        <div class="msg-meta hidden">
+          <div class="verdict"></div>
+          <div class="tabs-bar">
+            <button class="tab-btn active" data-tab="docs">📄 참고 문서</button>
+            <button class="tab-btn" data-tab="perf">📊 성능 지표</button>
+            <button class="tab-btn" data-tab="log">🔄 교정 로그</button>
+          </div>
+          <div class="tab-content" data-panel="docs"></div>
+          <div class="tab-content hidden" data-panel="perf"></div>
+          <div class="tab-content hidden" data-panel="log"></div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script src="/static/app_v31.js"></script>
+</body>
+
+</html>

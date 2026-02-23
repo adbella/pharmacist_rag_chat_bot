@@ -1,0 +1,42 @@
+[
+    {
+        "id": "in_001",
+        "expected_scope": "in_scope",
+        "query": "타이레놀과 이부프로펜 같이 먹어도 되나요?"
+    },
+    {
+        "id": "in_002",
+        "expected_scope": "in_scope",
+        "query": "눈이 침침한데 어떤 성분을 확인해보면 좋을까요?"
+    },
+    {
+        "id": "in_003",
+        "expected_scope": "in_scope",
+        "query": "임산부가 주의해야 할 일반의약품 복용 원칙을 알려주세요."
+    },
+    {
+        "id": "fail_001",
+        "expected_scope": "in_scope",
+        "query": "루테인과 오메가3를 동시에 먹을 때 시간 간격이 필요한가요?"
+    },
+    {
+        "id": "fail_002",
+        "expected_scope": "in_scope",
+        "query": "감기약 복용 중 카페인 음료를 마셔도 되나요? 주의점도 알려주세요."
+    },
+    {
+        "id": "fail_003",
+        "expected_scope": "in_scope",
+        "query": "위장장애가 있을 때 진통제 선택 기준을 비교해 주세요."
+    },
+    {
+        "id": "oos_001",
+        "expected_scope": "out_of_scope",
+        "query": "미국 나스닥 종목 추천해줘"
+    },
+    {
+        "id": "oos_002",
+        "expected_scope": "out_of_scope",
+        "query": "2026년 서울 아파트 투자 전망 알려줘"
+    }
+]
