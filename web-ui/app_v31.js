@@ -106,55 +106,7 @@ function renderMarkdown(text) {
     return html;
 }
 
-function getExternalApiStatusView(status) {
-    const labelMap = {
-        openfda: 'OpenFDA',
-        mfds_ezdrug: 'MFDS e약은요',
-        korea_hybrid: 'Korea Hybrid',
-    };
 
-    const shortState = (s) => {
-        if (s?.connected === true) return '연결됨';
-        if (s?.connected === false) return `오류(${s?.message || 'request_failed'})`;
-        return '확인중';
-    };
-
-    if (!status) {
-        return { text: '🌐 외부 API 상태: 정보 없음', tone: 'unknown' };
-    }
-
-    if (status.provider === 'korea_hybrid' && status.providers) {
-        const mf = status.providers.mfds_ezdrug || {};
-        const of = status.providers.openfda || {};
-        const tone = status.connected === true ? 'ok' : status.connected === false ? 'bad' : 'unknown';
-        return {
-            text: `🌐 외부 API 상태: MFDS ${shortState(mf)} · OpenFDA ${shortState(of)}`,
-            tone,
-        };
-    }
-
-    const label = labelMap[status.provider] || status.provider || 'External API';
-    if (status.connected === true) {
-        const suffix = status.message === 'connected_no_results' ? '연결됨(결과 없음)' : '연결됨';
-        return { text: `🌐 외부 API 상태: ${label} ${suffix}`, tone: 'ok' };
-    }
-    if (status.connected === false) {
-        const reason = status.http_status
-            ? `${status.message || 'request_failed'} / HTTP ${status.http_status}`
-            : (status.message || 'request_failed');
-        return { text: `🌐 외부 API 상태: ${label} 연결 실패 (${reason})`, tone: 'bad' };
-    }
-    return { text: `🌐 외부 API 상태: ${label} 확인 중...`, tone: 'unknown' };
-}
-
-function updateExternalApiStatus(status) {
-    const el = $('externalApiStatus');
-    if (!el) return;
-    const view = getExternalApiStatusView(status);
-    el.textContent = view.text;
-    el.classList.remove('ok', 'warn', 'bad', 'unknown');
-    el.classList.add(view.tone || 'unknown');
-}
 
 /* ══════════════════════════════════════════════════════════
    VRAM Polling
@@ -166,7 +118,6 @@ async function pollVRAM() {
         const data = await res.json();
 
         updateVramUI(data.gpu);
-        updateExternalApiStatus(data.external_api);
 
         // Initialization handling
         const overlay = $('initOverlay');
@@ -186,7 +137,6 @@ async function pollVRAM() {
         }
     } catch (err) {
         $('vramLabel').textContent = '서버 연결 대기 중...';
-        updateExternalApiStatus({ provider: 'external', connected: false, message: 'server_unreachable' });
         console.warn("Polling failed:", err);
     }
 }
@@ -445,7 +395,6 @@ function renderPerf(panel, metrics, verifyResult, ragas) {
     const triggerReason = Array.isArray(metrics?.external_trigger_reason)
         ? metrics.external_trigger_reason.join(', ')
         : '';
-    const extView = getExternalApiStatusView(metrics?.external_api_status);
     const f = (val) => (val || 0).toFixed(2);
 
     let ragasHtml = '';
@@ -468,12 +417,6 @@ function renderPerf(panel, metrics, verifyResult, ragas) {
     <div class="metric-total">
       <span class="metric-total-label">⏱️ 전체 소요 시간</span>
       <span class="metric-total-val">${m.total_s.toFixed(2)}s</span>
-    </div>
-    <div class="external-status-block">
-      <div class="external-status-line ${extView.tone}">${escHtml(extView.text)}</div>
-      <div class="external-status-sub">
-        fallback: ${fallbackTriggered ? 'triggered' : 'not_triggered'} · external docs: ${externalDocsCount}${triggerReason ? ` · reason: ${escHtml(triggerReason)}` : ''}
-      </div>
     </div>
     ${ragasHtml}
     <div class="metrics-grid">
@@ -798,9 +741,6 @@ function handleSSE(type, payload, state) {
             state.lastMetrics = payload.metrics || {};
             state.lastVerifyResult = payload.verify_result || '';
             state.metricsPending = !!payload.metrics_pending;
-            if (state.lastMetrics?.external_api_status) {
-                updateExternalApiStatus(state.lastMetrics.external_api_status);
-            }
 
             renderDocs(docsPanel, payload.docs || []);
             renderPerf(perfPanel, state.lastMetrics, state.lastVerifyResult, payload.ragas);

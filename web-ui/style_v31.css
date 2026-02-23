@@ -425,28 +425,6 @@ body.ui-ready .app-shell {
   margin-top: 0.35rem;
 }
 
-.external-api-status {
-  margin-top: 0.4rem;
-  font-size: 0.66rem;
-  line-height: 1.35;
-  color: var(--text-muted);
-}
-
-.external-api-status.ok {
-  color: var(--green);
-}
-
-.external-api-status.bad {
-  color: var(--red);
-}
-
-.external-api-status.warn {
-  color: var(--yellow);
-}
-
-.external-api-status.unknown {
-  color: var(--text-secondary);
-}
 
 /* Small Icon Button (for VRAM Clear) */
 .btn-icon-sm {

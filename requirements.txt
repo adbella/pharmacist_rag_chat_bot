@@ -1,10 +1,7 @@
-# ─────────────────────────────────────────────────
-# 약사 챗봇 RAG - Streamlit 앱 의존성 목록
+# 약사 챗봇 RAG - FastAPI 앱 의존성 목록
 # 설치: pip install -r requirements.txt
 # ─────────────────────────────────────────────────
 
-# Streamlit UI
-streamlit>=1.35.0
 
 # FastAPI Backend
 fastapi>=0.111.0

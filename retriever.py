@@ -11,9 +11,8 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-import streamlit as st
 import torch
-from decorators import conditional_cache_resource
+from langchain_chroma import Chroma
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.retrievers import BM25Retriever
@@ -58,7 +57,6 @@ _configure_gpu()
 # 리소스 로더 (@st.cache_resource → 최초 1회만 실행)
 # ──────────────────────────────────────────────────────────────────────
 
-@conditional_cache_resource(show_spinner="🧬 BGE-M3 임베딩 모델 로드 중...")
 def load_embeddings() -> HuggingFaceEmbeddings:
     """
     BGE-M3-ko 임베딩 모델을 로드합니다.
@@ -95,7 +93,6 @@ def load_embeddings() -> HuggingFaceEmbeddings:
     return embeddings
 
 
-@conditional_cache_resource(show_spinner="📦 ChromaDB 벡터 DB 로드 중...")
 def load_vector_db(db_path: str) -> Chroma:
     """
     로컬 ChromaDB를 로드합니다.
@@ -113,7 +110,6 @@ def load_vector_db(db_path: str) -> Chroma:
     return vector_db
 
 
-@conditional_cache_resource(show_spinner="⚡ CrossEncoder 리랭커 로드 중...")
 def load_reranker() -> CrossEncoder:
     """
     BAAI/bge-reranker-v2-m3 리랭킹 모델을 로드합니다.
@@ -138,7 +134,6 @@ def load_reranker() -> CrossEncoder:
     return reranker
 
 
-@conditional_cache_resource(show_spinner="🚀 BM25 인덱스 구축 중 (최초 1회, 약 1~2분 소요)...")
 def build_bm25_retriever(db_path: str) -> tuple[BM25Retriever, object]:
     """
     ChromaDB에서 전체 문서를 가져와 Kiwi 형태소 분석 후 BM25 인덱스를 구축합니다.
