@@ -23,6 +23,7 @@ const EXAMPLE_QUESTIONS = [
 let isStreaming = false;
 let selfCorrEnabled = true;
 let currentController = null;
+let _activeStreamPromise = null;  // tracks in-flight stream so stop waits for full teardown
 let placeholderTimer = null;
 
 const PLACEHOLDERS = [
@@ -516,8 +517,15 @@ function clearChat() {
 ══════════════════════════════════════════════════════════ */
 async function sendMessage() {
     if (isStreaming) {
-        // Stop streaming
-        if (currentController) currentController.abort();
+        // Stop streaming — abort and wait for the stream's finally to complete
+        if (currentController) {
+            currentController.abort();
+            currentController = null;
+        }
+        if (_activeStreamPromise) {
+            try { await _activeStreamPromise; } catch { /* expected abort */ }
+            _activeStreamPromise = null;
+        }
         hideMetricsOverlay();
         setStreaming(false);
         clearStatus();
@@ -552,79 +560,86 @@ async function sendMessage() {
         metricsPending: false,
     };
 
-    try {
-        const body = {
-            query,
-            model: modelSelect.value,
-            top_k: parseInt(topkSlider.value),
-            ensemble_k: 20,
-            weight_bm25: parseInt(bm25Slider.value) / 100,
-            use_self_correction: selfCorrEnabled,
-        };
+    // Wrap the entire stream lifecycle in a trackable promise
+    const streamPromise = (async () => {
+        try {
+            const body = {
+                query,
+                model: modelSelect.value,
+                top_k: parseInt(topkSlider.value),
+                ensemble_k: 20,
+                weight_bm25: parseInt(bm25Slider.value) / 100,
+                use_self_correction: selfCorrEnabled,
+            };
 
-        const res = await fetch(`${API_BASE}/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-        });
+            const res = await fetch(`${API_BASE}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
 
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-        }
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+            }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = '';
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-            buf += decoder.decode(value, { stream: true });
+                buf += decoder.decode(value, { stream: true });
 
-            // Parse SSE lines
-            const lines = buf.split('\n');
-            buf = lines.pop(); // keep incomplete line
+                // Parse SSE lines
+                const lines = buf.split('\n');
+                buf = lines.pop(); // keep incomplete line
 
-            let eventType = '';
-            for (const line of lines) {
-                if (line.startsWith('event: ')) {
-                    eventType = line.slice(7).trim();
-                } else if (line.startsWith('data: ')) {
-                    const raw = line.slice(6).trim();
-                    try {
-                        const payload = JSON.parse(raw);
-                        handleSSE(eventType, payload, streamState);
-                        // 상태 변화가 있을 때 VRAM 즉시 폴링
-                        if (eventType === 'status' || eventType === 'done') pollVRAM();
-                    } catch {/* skip bad JSON */ }
-                    eventType = '';
+                let eventType = '';
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) {
+                        eventType = line.slice(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        const raw = line.slice(6).trim();
+                        try {
+                            const payload = JSON.parse(raw);
+                            handleSSE(eventType, payload, streamState);
+                            // 상태 변화가 있을 때 VRAM 즉시 폴링
+                            if (eventType === 'status' || eventType === 'done') pollVRAM();
+                        } catch {/* skip bad JSON */ }
+                        eventType = '';
+                    }
                 }
             }
-        }
 
-    } catch (err) {
-        if (err.name === 'AbortError') {
-            // user stopped
-        } else {
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                // user stopped — normal, no error display
+            } else {
+                dotsEl.classList.add('hidden');
+                textEl.innerHTML = renderMarkdown(`❌ 오류가 발생했습니다: \`${err.message}\`\n\n서버가 실행 중인지 확인해 주세요.`);
+                hideMetricsOverlay();
+            }
+        } finally {
             dotsEl.classList.add('hidden');
-            textEl.innerHTML = renderMarkdown(`❌ 오류가 발생했습니다: \`${err.message}\`\n\n서버가 실행 중인지 확인해 주세요.`);
-            hideMetricsOverlay();
+            if (!streamState.metricsPending) {
+                hideMetricsOverlay();
+            }
+            setStreaming(false);
+            if (!streamState.metricsPending) {
+                clearStatus();
+            }
+            scrollToBottom();
+            currentController = null;
+            _activeStreamPromise = null;
+            updateSendButtonState();
         }
-    } finally {
-        dotsEl.classList.add('hidden');
-        if (!streamState.metricsPending) {
-            hideMetricsOverlay();
-        }
-        setStreaming(false);
-        if (!streamState.metricsPending) {
-            clearStatus();
-        }
-        scrollToBottom();
-        currentController = null;
-        updateSendButtonState();
-    }
+    })();
+
+    _activeStreamPromise = streamPromise;
+    await streamPromise;
 }
 
 /* ══════════════════════════════════════════════════════════

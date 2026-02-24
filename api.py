@@ -171,12 +171,13 @@ async def chat_stream(req: ChatRequest):
             if pending:
                 for t in pending:
                     t.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
+                try:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                except Exception:
+                    pass
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.get_event_loop()
+        # NOTE: Do NOT capture the event loop here — always use asyncio.get_event_loop()
+        # at point-of-use to avoid holding a reference to a closed/stale loop.
 
         def _sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -202,7 +203,7 @@ async def chat_stream(req: ChatRequest):
         try:
             yield _sse("status", {"step": "검색 중...", "icon": "🔍"})
             search_start = time.time()
-            ensemble_docs, search_breakdown = await loop.run_in_executor(
+            ensemble_docs, search_breakdown = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: get_ensemble_results(
                     query=req.query,
@@ -238,7 +239,7 @@ async def chat_stream(req: ChatRequest):
 
             yield _sse("status", {"step": f"{len(ensemble_docs)}개 문서 리랭킹 중...", "icon": "⚡"})
             rerank_start = time.time()
-            ranked_pairs, rerank_breakdown = await loop.run_in_executor(
+            ranked_pairs, rerank_breakdown = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: rerank_docs(
                     query=rerank_query,
@@ -354,7 +355,7 @@ async def chat_stream(req: ChatRequest):
             yield _sse("status", {"step": "품질 검증 및 지표 분석 중...", "icon": "⚡"})
 
             async def _run_verify():
-                return await loop.run_in_executor(
+                return await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: verify_answer(
                         query=req.query,
@@ -368,7 +369,7 @@ async def chat_stream(req: ChatRequest):
             async def _run_ragas():
                 if req.model == "debug":
                     return {"faithfulness": 0.0, "answer_relevancy": 0.0}
-                return await loop.run_in_executor(
+                return await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: evaluate_with_ragas(
                         query=req.query,
@@ -450,18 +451,37 @@ async def chat_stream(req: ChatRequest):
                 },
             })
 
-            # ── RAGAS 결과 수신 ──
-            if ragas_task:
+            # ── RAGAS 결과 수신 (shield: 클라이언트 연결이 끊겨도 태스크는 완료까지 실행) ──
+            if ragas_task and not ragas_task.done() and not ragas_task.cancelled():
                 try:
-                    ragas_results = await ragas_task
+                    ragas_results = await asyncio.shield(ragas_task)
                     yield _sse("metrics_update", ragas_results)
-                except BaseException as ragas_err:
-                    logger.warning("RAGAS evaluation failed or cancelled: %s", ragas_err)
+                except asyncio.CancelledError:
+                    # 현재 요청이 취소됐지만 ragas_task 자체는 계속 실행 중 — 결과는 버림
+                    logger.info("RAGAS await cancelled (client disconnected), task continues in background.")
+                    raise
+                except Exception as ragas_err:
+                    logger.warning("RAGAS evaluation failed: %s", ragas_err)
+                    yield _sse("metrics_update", {"faithfulness": 0.0, "answer_relevancy": 0.0})
+            elif ragas_task and ragas_task.done() and not ragas_task.cancelled():
+                try:
+                    ragas_results = ragas_task.result()
+                    yield _sse("metrics_update", ragas_results)
+                except Exception as ragas_err:
+                    logger.warning("RAGAS result error: %s", ragas_err)
                     yield _sse("metrics_update", {"faithfulness": 0.0, "answer_relevancy": 0.0})
 
         except asyncio.CancelledError:
             logger.info("Chat stream cancelled by client.")
-            await _cancel_pending_tasks()
+            # _cancel_pending_tasks()는 여기서 호출하지 않음 — finally에서 처리
+            # ragas_task는 background에서 계속 실행되므로 cancel하지 않음
+            if verify_task and not verify_task.done():
+                verify_task.cancel()
+            return
+        except GeneratorExit:
+            logger.info("Chat generator exited (client closed connection).")
+            if verify_task and not verify_task.done():
+                verify_task.cancel()
             return
         except Exception as e:
             logger.exception("Chat error: %s", e)
@@ -492,10 +512,18 @@ async def chat_stream(req: ChatRequest):
                             **{k: round(float(v), 3) for k, v in rerank_breakdown.items()},
                         },
                     })
+            except (GeneratorExit, asyncio.CancelledError):
+                pass  # 클라이언트가 이미 끊긴 경우 — 정상
             except Exception:
                 pass
         finally:
-            await _cancel_pending_tasks()
+            # verify_task만 정리 (ragas_task는 background 완료 허용)
+            if verify_task and not verify_task.done():
+                verify_task.cancel()
+                try:
+                    await asyncio.shield(asyncio.gather(verify_task, return_exceptions=True))
+                except Exception:
+                    pass
 
     return StreamingResponse(
         generate(),
