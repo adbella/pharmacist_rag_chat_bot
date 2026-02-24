@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <defs>
+    <linearGradient id="pillGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0.1"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+    <!-- Animated orbit circles -->
+    <linearGradient id="orbitGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="orbitGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background glow -->
+  <circle cx="100" cy="100" r="70" fill="url(#glowGrad)" filter="url(#softGlow)"/>
+
+  <!-- Orbit rings -->
+  <ellipse cx="100" cy="100" rx="75" ry="30" stroke="url(#orbitGrad1)" stroke-width="0.8" transform="rotate(-20 100 100)" opacity="0.5">
+    <animateTransform attributeName="transform" type="rotate" from="-20 100 100" to="340 100 100" dur="20s" repeatCount="indefinite"/>
+  </ellipse>
+  <ellipse cx="100" cy="100" rx="85" ry="25" stroke="url(#orbitGrad2)" stroke-width="0.6" transform="rotate(40 100 100)" opacity="0.4">
+    <animateTransform attributeName="transform" type="rotate" from="40 100 100" to="-320 100 100" dur="25s" repeatCount="indefinite"/>
+  </ellipse>
+
+  <!-- Orbiting dots -->
+  <circle r="3" fill="#3b82f6" opacity="0.8">
+    <animateMotion dur="20s" repeatCount="indefinite">
+      <mpath href="#orbit1"/>
+    </animateMotion>
+  </circle>
+  <ellipse id="orbit1" cx="100" cy="100" rx="75" ry="30" fill="none"/>
+
+  <circle r="2.5" fill="#22c55e" opacity="0.7">
+    <animateMotion dur="25s" repeatCount="indefinite">
+      <mpath href="#orbit2"/>
+    </animateMotion>
+  </circle>
+  <ellipse id="orbit2" cx="100" cy="100" rx="85" ry="25" fill="none"/>
+
+  <!-- Capsule pill - main shape -->
+  <g filter="url(#glow)" transform="translate(100,100) rotate(-30)">
+    <!-- Left half (blue) -->
+    <rect x="-35" y="-14" width="35" height="28" rx="14" fill="#3b82f6"/>
+    <!-- Right half (green) -->
+    <rect x="0" y="-14" width="35" height="28" rx="14" fill="#22c55e"/>
+    <!-- Highlight -->
+    <rect x="-30" y="-11" width="60" height="6" rx="3" fill="white" opacity="0.2"/>
+    <!-- Center line -->
+    <line x1="0" y1="-14" x2="0" y2="14" stroke="rgba(0,0,0,0.15)" stroke-width="1"/>
+  </g>
+
+  <!-- Floating particles -->
+  <circle cx="45" cy="55" r="2" fill="#3b82f6" opacity="0.6">
+    <animate attributeName="cy" values="55;48;55" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;1;0.6" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="155" cy="65" r="1.5" fill="#22c55e" opacity="0.5">
+    <animate attributeName="cy" values="65;58;65" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.5;0.9;0.5" dur="4s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="60" cy="145" r="1.8" fill="#8b5cf6" opacity="0.5">
+    <animate attributeName="cy" values="145;138;145" dur="3.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="145" cy="140" r="1.5" fill="#3b82f6" opacity="0.4">
+    <animate attributeName="cy" values="140;134;140" dur="2.8s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Data stream dots -->
+  <g opacity="0.4">
+    <circle cx="30" cy="100" r="1" fill="#60a5fa">
+      <animate attributeName="cx" values="30;170" dur="5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.8;0" dur="5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="170" cy="90" r="1" fill="#4ade80">
+      <animate attributeName="cx" values="170;30" dur="6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.7;0" dur="6s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+</svg>

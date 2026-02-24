@@ -17,6 +17,7 @@
 <body>
   <div class="bg-blur bg-blur-1" aria-hidden="true"></div>
   <div class="bg-blur bg-blur-2" aria-hidden="true"></div>
+  <div class="bg-blur bg-blur-3" aria-hidden="true"></div>
   <div class="bg-grid" aria-hidden="true"></div>
 
   <!-- ═══════════════════════════════════════════════════════ INIT OVERLAY ══ -->
@@ -255,40 +256,59 @@
         <!-- Empty state -->
         <div class="empty-state" id="emptyState">
           <div class="empty-hero">
-            <div class="empty-icon-wrap">
-              <span class="empty-icon">💊</span>
+            <div class="hero-illustration" data-aos="zoom-in">
+              <img src="/static/img/hero-pill.svg" alt="약사 AI" class="hero-svg" />
             </div>
-            <h1 class="empty-title">약사 AI에게 물어보세요</h1>
-            <p class="empty-sub">외부 의약품 데이터베이스 기반 RAG 시스템<br />근거 중심 · 출처 표기 · 자기 검증</p>
-            <div class="trust-strip">
-              <div class="trust-chip">📚 출처 기반 문서 검색</div>
-              <div class="trust-chip">🛡️ 답변 자기 검증</div>
-              <div class="trust-chip">⚕️ 약학 특화 질의응답</div>
+            <h1 class="empty-title" data-aos="fade-up" data-aos-delay="100">약사 AI에게 물어보세요</h1>
+            <p class="empty-sub" data-aos="fade-up" data-aos-delay="200">외부 의약품 데이터베이스 기반 RAG 시스템<br />근거 중심 · 출처 표기 ·
+              자기 검증</p>
+            <div class="trust-strip" data-aos="fade-in" data-aos-delay="300">
+              <div class="marquee-track">
+                <div class="trust-chip">📚 출처 기반 문서 검색</div>
+                <div class="trust-chip">🛡️ 답변 자기 검증</div>
+                <div class="trust-chip">⚕️ 약학 특화 질의응답</div>
+                <div class="trust-chip">🔬 근거 중심 분석</div>
+                <div class="trust-chip">💊 의약품 상호작용 확인</div>
+                <!-- Duplicate for seamless loop -->
+                <div class="trust-chip">📚 출처 기반 문서 검색</div>
+                <div class="trust-chip">🛡️ 답변 자기 검증</div>
+                <div class="trust-chip">⚕️ 약학 특화 질의응답</div>
+                <div class="trust-chip">🔬 근거 중심 분석</div>
+                <div class="trust-chip">💊 의약품 상호작용 확인</div>
+              </div>
             </div>
-            <div class="feature-chips">
+            <div class="feature-chips" data-aos="fade-up" data-aos-delay="400">
               <div class="feature-chip">
-                <span class="chip-icon">🔍</span>
+                <div class="chip-icon-img">
+                  <img src="/static/img/feature-search.svg" alt="검색" />
+                </div>
                 <div>
                   <div class="chip-name">앙상블 검색</div>
                   <div class="chip-desc">BM25 + 벡터 RRF</div>
                 </div>
               </div>
               <div class="feature-chip">
-                <span class="chip-icon">⚡</span>
+                <div class="chip-icon-img">
+                  <img src="/static/img/feature-rerank.svg" alt="리랭킹" />
+                </div>
                 <div>
                   <div class="chip-name">CrossEncoder 리랭킹</div>
                   <div class="chip-desc">정밀 관련도 정렬</div>
                 </div>
               </div>
               <div class="feature-chip">
-                <span class="chip-icon">🧐</span>
+                <div class="chip-icon-img">
+                  <img src="/static/img/feature-verify.svg" alt="검증" />
+                </div>
                 <div>
                   <div class="chip-name">GPT 자기 검증</div>
                   <div class="chip-desc">PASS / FAIL 판정</div>
                 </div>
               </div>
               <div class="feature-chip">
-                <span class="chip-icon">🔄</span>
+                <div class="chip-icon-img">
+                  <img src="/static/img/feature-loop.svg" alt="교정" />
+                </div>
                 <div>
                   <div class="chip-name">자기 교정 루프</div>
                   <div class="chip-desc">최대 3회 재시도</div>

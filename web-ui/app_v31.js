@@ -789,3 +789,69 @@ queryInput.focus();
 updateSendButtonState();
 startPlaceholderRotation();
 requestAnimationFrame(() => document.body.classList.add('ui-ready'));
+
+/* ══════════════════════════════════════════════════════════
+   AOS — Animate On Scroll (IntersectionObserver)
+══════════════════════════════════════════════════════════ */
+(function initAOS() {
+    const aosElements = document.querySelectorAll('[data-aos]');
+    if (!aosElements.length) return;
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('aos-animate');
+            }
+        });
+    }, {
+        threshold: 0.15,
+        rootMargin: '0px 0px -30px 0px'
+    });
+
+    aosElements.forEach(el => observer.observe(el));
+
+    // Trigger immediately visible elements after a short delay for page load animation
+    setTimeout(() => {
+        aosElements.forEach(el => {
+            const rect = el.getBoundingClientRect();
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                el.classList.add('aos-animate');
+            }
+        });
+    }, 100);
+})();
+
+/* ══════════════════════════════════════════════════════════
+   Parallax Scroll Effect
+══════════════════════════════════════════════════════════ */
+(function initParallax() {
+    const blurs = document.querySelectorAll('.bg-blur');
+    const speeds = [0.03, -0.02, 0.015]; // Different speed for each blob
+
+    if (chatArea) {
+        chatArea.addEventListener('scroll', () => {
+            const scrollY = chatArea.scrollTop;
+            blurs.forEach((blur, i) => {
+                const speed = speeds[i] || 0.01;
+                blur.style.transform = `translateY(${scrollY * speed}px)`;
+            });
+        }, { passive: true });
+    }
+})();
+
+/* ══════════════════════════════════════════════════════════
+   Send Button Ripple Effect
+══════════════════════════════════════════════════════════ */
+if (sendBtn) {
+    sendBtn.addEventListener('click', function (e) {
+        const ripple = document.createElement('span');
+        ripple.className = 'ripple';
+        const rect = this.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height);
+        ripple.style.width = ripple.style.height = size + 'px';
+        ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+        ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+        this.appendChild(ripple);
+        ripple.addEventListener('animationend', () => ripple.remove());
+    });
+}

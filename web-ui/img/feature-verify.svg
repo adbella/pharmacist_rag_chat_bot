@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
+  <defs>
+    <linearGradient id="vg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <filter id="vg1"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <!-- Shield -->
+  <path d="M40 12 L60 22 L60 42 C60 56 40 68 40 68 C40 68 20 56 20 42 L20 22 Z" fill="#0f172a" stroke="url(#vg)" stroke-width="1.8"/>
+  <!-- Inner shield pattern -->
+  <path d="M40 18 L54 26 L54 40 C54 52 40 62 40 62 C40 62 26 52 26 40 L26 26 Z" fill="url(#vg)" opacity="0.12"/>
+  <!-- Checkmark -->
+  <g filter="url(#vg1)">
+    <path d="M30 40 L37 47 L52 32" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <animate attributeName="stroke-dasharray" values="0 40;40 0" dur="1.5s" repeatCount="indefinite"/>
+    </path>
+  </g>
+  <!-- Pulse ring -->
+  <circle cx="40" cy="40" r="28" stroke="#22c55e" stroke-width="0.8" fill="none" opacity="0.3">
+    <animate attributeName="r" values="28;34;28" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0;0.3" dur="3s" repeatCount="indefinite"/>
+  </circle>
+</svg>
