@@ -7,7 +7,7 @@ console.log("%c💊 Pharmacist RAG v2.8 Loaded", "color: #3b82f6; font-weight: b
 /* ══════════════════════════════════════════════════════════
    Configuration
 ══════════════════════════════════════════════════════════ */
-const API_BASE = 'http://localhost:8000';
+const API_BASE = window.location.origin;
 
 const EXAMPLE_QUESTIONS = [
     '눈에 도움되는 약이 있나요?',
