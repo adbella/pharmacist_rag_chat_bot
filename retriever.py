@@ -13,10 +13,11 @@ import re
 import json
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import torch
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.retrievers import BM25Retriever
+from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
 from sentence_transformers import CrossEncoder
 
@@ -254,15 +255,13 @@ def load_reranker() -> CrossEncoder:
     return reranker
 
 
-def build_bm25_retriever(db_path: str | None = None, vector_db: Chroma | None = None) -> tuple[BM25Retriever, object]:
+def build_bm25_retriever(db_path: str | None = None, vector_db: Chroma | None = None) -> tuple[BM25Okapi, list[Document], object]:
     """
-    ChromaDB에서 전체 문서를 가져와 Kiwi 형태소 분석 후 BM25 인덱스를 구축합니다.
-
-    Args:
-        db_path: ChromaDB 경로
+    ChromaDB에 저장된 문서를 가져와 BM25Okapi 인덱스를 직접 구축합니다.
+    v3.py 최적화: LangChain BM25Retriever 래퍼 대신 rank_bm25 직접 사용.
 
     Returns:
-        (bm25_retriever, kiwi) 튜플
+        (bm25: BM25Okapi, original_docs: list[Document], kiwi) 튜플
     """
     t0 = time.time()
     if vector_db is None:
@@ -284,33 +283,31 @@ def build_bm25_retriever(db_path: str | None = None, vector_db: Chroma | None = 
     tokenized_corpus = tokenize_corpus(original_docs, kiwi)
     logger.info("[BM25] Kiwi 토크나이징 완료: %.2fs", time.time() - t1)
 
-    # 3. BM25 리트리버 구축 (이미 토큰화된 텍스트를 공백 조인해 전달,
-    #    preprocess_func으로 재분리하여 rank_bm25의 내부 코퍼스에 적재)
+    # 3. BM25Okapi 직접 구축 (v3.py 방식: 래퍼 오버헤드 제거)
     t2 = time.time()
-    joined_texts = [" ".join(tokens) for tokens in tokenized_corpus]
-    bm25_retriever = BM25Retriever.from_texts(
-        joined_texts,
-        metadatas=[doc.metadata for doc in original_docs],
-        preprocess_func=lambda x: x.split(),  # 공백 split → 토큰 리스트 복원
-        k=35,
-    )
-    # 원본 Document 복원 (BM25Retriever가 반환할 때 사용)
-    bm25_retriever.docs = original_docs
+    bm25 = BM25Okapi(tokenized_corpus)
     logger.info("[BM25] 인덱스 구축 완료: %.2fs", time.time() - t2)
     logger.info("[BM25] 전체 초기화 소요: %.2fs", time.time() - t0)
 
-    return bm25_retriever, kiwi
+    return bm25, original_docs, kiwi
 
 
 # ──────────────────────────────────────────────────────────────────────
 # 앙상블 검색 (BM25 + Vector, RRF 통합) — 병렬 실행 버전
 # ──────────────────────────────────────────────────────────────────────
 
+def _doc_key(doc: Document) -> str:
+    """v3.py 방식: 메타데이터 기반 문서 고유 키 (RRF 중복 제거용)."""
+    meta = doc.metadata or {}
+    return meta.get("id") or meta.get("_source_file") or meta.get("source") or str(hash(doc.page_content))
+
+
 def get_ensemble_results(
     query: str,
     kiwi,
-    bm25_retriever: BM25Retriever,
+    bm25_retriever: BM25Okapi,
     vector_db: Chroma,
+    bm25_docs: list[Document] | None = None,
     query_optimizer=None,
     search_keywords: str | None = None,
     k: int = 20,
@@ -319,9 +316,10 @@ def get_ensemble_results(
     return_metrics: bool = False,
 ) -> list[Document] | tuple[list[Document], dict[str, float]]:
     """
-    콜랩 원본 코드를 참고한 지능형 앙상블 검색 실행.
-    - MMR 검색으로 다양성 확보
-    - 특정 태그(N, X, S, VA) 기반 키워드 필터링
+    v3.py 최적화 앙상블 검색:
+    - BM25Okapi 직접 스코어링 (np.argsort)
+    - 메타데이터 기반 doc_key RRF 중복 제거
+    - MMR 벡터 검색으로 다양성 확보
     """
     t0 = time.time()
     metrics = {
@@ -333,37 +331,37 @@ def get_ensemble_results(
         "search_total_s": 0.0,
     }
 
-    # 1. Query Expansion (Query Expansion)
+    # 1. Query Expansion
     t_router = time.time()
     if search_keywords is None:
         search_keywords = _build_context_router_keywords(query, query_optimizer)
     metrics["router_s"] = time.time() - t_router
 
-    # 2. 키워드 토큰화 (Colab 원본 코드 기준 태그 필터링)
+    # 2. 키워드 토큰화 (v3.py 태그 필터링)
     t_tok = time.time()
     query_tokens = [
         t.form
         for t in kiwi.tokenize(search_keywords)
         if t.tag.startswith(('N', 'X', 'S', 'VA'))
     ]
-    query_text = " ".join(query_tokens)
     metrics["tokenize_s"] = time.time() - t_tok
 
-    # 3. 각 검색 수행 (BM25 + MMR 벡터 검색 병렬 처리)
+    # 3. BM25 + Vector 병렬 검색
     def _bm25_search():
         t = time.time()
-        # BM25 리트리버를 통해 키워드 검색
-        docs = bm25_retriever.invoke(query_text)
+        if not query_tokens or bm25_docs is None:
+            return [], time.time() - t
+        scores = bm25_retriever.get_scores(query_tokens)
+        top_idx = np.argsort(scores)[::-1][:k]
+        docs = [bm25_docs[i] for i in top_idx if i < len(bm25_docs)]
         return docs, time.time() - t
 
     def _vector_search():
         t = time.time()
-        # MMR(Maximum Marginal Relevance) 검색으로 결과의 다양성 확보
-        # fetch_k: 후보군 추출 수, lambda_mult: 다양성 지수 (0에 가까울수록 다양)
         docs = vector_db.max_marginal_relevance_search(
-            f"query: {query}", 
-            k=k, 
-            fetch_k=min(k * 2, 40), 
+            f"query: {query}",
+            k=k,
+            fetch_k=min(k * 2, 40),
             lambda_mult=0.5
         )
         return docs, time.time() - t
@@ -374,34 +372,27 @@ def get_ensemble_results(
         keyword_docs, metrics["bm25_s"] = future_bm25.result()
         vector_docs, metrics["vector_s"] = future_vector.result()
 
-    # 4. RRF(Reciprocal Rank Fusion) 통합 및 데이터 타입 교정
+    # 4. RRF 통합 (v3.py doc_key 방식: 메타데이터 기반 중복 제거)
     t_fusion = time.time()
-    doc_scores: dict[str, float] = {}
+    rrf_scores: dict[str, float] = {}
     doc_map: dict[str, Document] = {}
 
-    def _process_results(docs, weight: float) -> None:
+    def _add_rrf(docs: list[Document], weight: float) -> None:
         for rank, doc in enumerate(docs):
-            if isinstance(doc, Document):
-                content = doc.page_content
-                doc_obj = doc
-            elif isinstance(doc, list):
-                content = " ".join(doc)
-                doc_obj = Document(page_content=content, metadata={"source": "BM25_Index"})
-            else:
-                content = str(doc)
-                doc_obj = Document(page_content=content, metadata={"source": "Unknown"})
+            if not isinstance(doc, Document):
+                continue
+            key = _doc_key(doc)
+            if key not in rrf_scores:
+                rrf_scores[key] = 0.0
+                doc_map[key] = doc
+            rrf_scores[key] += weight * (1.0 / (rank + 60))
 
-            if content not in doc_scores:
-                doc_map[content] = doc_obj
-                doc_scores[content] = 0.0
-            doc_scores[content] += weight * (1 / (rank + 60))
+    _add_rrf(keyword_docs, weight_bm25)
+    _add_rrf(vector_docs, weight_vector)
 
-    _process_results(keyword_docs, weight_bm25)
-    _process_results(vector_docs, weight_vector)
-
-    # 5. 최종 결과 정렬 및 k개 반환
-    sorted_items = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
-    results = [doc_map[content] for content, score in sorted_items[:k]]
+    # 5. 최종 결과 정렬
+    ranked_keys = sorted(rrf_scores, key=lambda kk: rrf_scores[kk], reverse=True)[:k]
+    results = [doc_map[kk] for kk in ranked_keys]
     metrics["fusion_s"] = time.time() - t_fusion
     metrics["search_total_s"] = time.time() - t0
     if return_metrics:

@@ -74,10 +74,10 @@ app.add_middleware(
 
 DB_PATH = "./chroma_db_combined_1771477980"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OOS_GUARD_ENABLED = os.getenv("OOS_GUARD_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+OOS_GUARD_ENABLED = os.getenv("OOS_GUARD_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 OOS_MIN_RELEVANCE = float(os.getenv("OOS_MIN_RELEVANCE", "0.55"))
-OOS_MIN_TOP_SCORE = float(os.getenv("OOS_MIN_TOP_SCORE", "0.002"))
-USE_QUERY_OPTIMIZER = os.getenv("USE_QUERY_OPTIMIZER", "false").lower() in {"1", "true", "yes", "on"}
+OOS_MIN_TOP_SCORE = float(os.getenv("OOS_MIN_TOP_SCORE", "0.01"))
+USE_QUERY_OPTIMIZER = os.getenv("USE_QUERY_OPTIMIZER", "true").lower() in {"1", "true", "yes", "on"}
 VERIFY_MODEL = os.getenv("VERIFY_MODEL", "gpt-5.2")
 RAGAS_MODEL = os.getenv("RAGAS_MODEL", "gpt-5.2")
 RERANK_BATCH_SIZE = max(1, int(os.getenv("RERANK_BATCH_SIZE", "32")))
@@ -103,7 +103,7 @@ def _load_all_resources():
     _log_init("벡터 데이터베이스 연결 완료")
     _resources["reranker"] = load_reranker()
     _log_init("리랭커 모델 로드 완료")
-    _resources["bm25"], _resources["kiwi"] = build_bm25_retriever(vector_db=_resources["vector_db"])
+    _resources["bm25"], _resources["bm25_docs"], _resources["kiwi"] = build_bm25_retriever(vector_db=_resources["vector_db"])
     _log_init("BM25 인덱스 생성 완료")
     _resources["query_optimizer"] = get_query_optimizer(OPENAI_API_KEY) if USE_QUERY_OPTIMIZER else None
     _log_init("쿼리 최적화기 준비 완료" if USE_QUERY_OPTIMIZER else "쿼리 최적화기 비활성화(속도 우선)")
@@ -113,7 +113,7 @@ def _load_all_resources():
 
 class ChatRequest(BaseModel):
     query: str
-    model: str = "gpt-5"
+    model: str = "gpt-5.1"
     top_k: int = 5
     ensemble_k: int = 20
     weight_bm25: float = 0.8
@@ -153,6 +153,7 @@ async def chat_stream(req: ChatRequest):
 
     async def generate() -> AsyncGenerator[str, None]:
         total_start = time.time()
+        done_sent = False
         verify_task = None
         ragas_task = None
         search_elapsed = 0.0
@@ -180,6 +181,24 @@ async def chat_stream(req: ChatRequest):
         def _sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+        import re
+        def _is_pass(vr: str) -> bool:
+            """검증 결과에서 [최종 판정] 파싱. 분석 코멘트의 PASS/FAIL 혼재를 무시."""
+            # [최종 판정]: PASS 또는 FAIL 패턴 우선 탐색
+            m = re.search(r'\[최종\s*판정\]\s*[:：]\s*(PASS|FAIL)', vr, re.IGNORECASE)
+            if m:
+                result = m.group(1).upper() == 'PASS'
+                logger.info("[Verdict] Pattern match: '%s' -> %s", m.group(0), result)
+                return result
+            # 패턴 못 찾으면 마지막 PASS/FAIL 단어 기준
+            tokens = re.findall(r'\b(PASS|FAIL)\b', vr, re.IGNORECASE)
+            if tokens:
+                result = tokens[-1].upper() == 'PASS'
+                logger.info("[Verdict] Fallback last token: '%s' -> %s", tokens[-1], result)
+                return result
+            logger.warning("[Verdict] No PASS/FAIL found in verify_result")
+            return False
+
         try:
             yield _sse("status", {"step": "검색 중...", "icon": "🔍"})
             search_start = time.time()
@@ -190,6 +209,7 @@ async def chat_stream(req: ChatRequest):
                     kiwi=_resources["kiwi"],
                     bm25_retriever=_resources["bm25"],
                     vector_db=_resources["vector_db"],
+                    bm25_docs=_resources["bm25_docs"],
                     query_optimizer=_resources.get("query_optimizer"),
                     k=req.ensemble_k,
                     weight_bm25=req.weight_bm25,
@@ -199,12 +219,29 @@ async def chat_stream(req: ChatRequest):
             )
             search_elapsed = time.time() - search_start
 
+            # 리랭킹 쿼리: 옵티마이저가 있으면 의료 핵심어로 재구성
+            rerank_query = req.query
+            if USE_QUERY_OPTIMIZER and _resources.get("query_optimizer"):
+                try:
+                    from langchain_core.output_parsers import StrOutputParser
+                    opt = _resources["query_optimizer"]
+                    clean_prompt = (
+                        "사용자 질문에서 약학/의학 관련 핵심 키워드만 추출하여 검색 쿼리로 변환하세요.\n"
+                        "비의학적 표현(뭐먹을까, 어떡해, 괜찮을까 등)은 제거하세요.\n"
+                        "출력: 핵심 검색 쿼리만 (한 줄)\n"
+                        f"입력: {req.query}"
+                    )
+                    rerank_query = opt.invoke(clean_prompt).strip().strip('"').strip("'")
+                    logger.info("리랭킹 쿼리 최적화: '%s' -> '%s'", req.query, rerank_query)
+                except Exception as e:
+                    logger.warning("리랭킹 쿼리 최적화 실패: %s", e)
+
             yield _sse("status", {"step": f"{len(ensemble_docs)}개 문서 리랭킹 중...", "icon": "⚡"})
             rerank_start = time.time()
             ranked_pairs, rerank_breakdown = await loop.run_in_executor(
                 None,
                 lambda: rerank_docs(
-                    query=req.query,
+                    query=rerank_query,
                     docs=ensemble_docs,
                     reranker=_resources["reranker"],
                     top_k=req.top_k,
@@ -217,10 +254,25 @@ async def chat_stream(req: ChatRequest):
             rerank_scores = [s for s, _ in ranked_pairs]
             final_docs = [d for _, d in ranked_pairs]
 
+            # 최소 점수 임계값 적용: 관련성 낮은 문서 제거
+            MIN_RERANK_SCORE = 0.005
+            filtered = [(s, d) for s, d in zip(rerank_scores, final_docs) if s >= MIN_RERANK_SCORE]
+            if filtered:
+                rerank_scores, final_docs = zip(*filtered)
+                rerank_scores = list(rerank_scores)
+                final_docs = list(final_docs)
+            else:
+                # 모든 문서가 임계값 이하면 상위 1개라도 유지
+                rerank_scores = rerank_scores[:1]
+                final_docs = final_docs[:1]
+            logger.info("문서 필터링: %d/%d개 (임계값 %.3f)", len(final_docs), len(ranked_pairs), MIN_RERANK_SCORE)
+
             def _build_docs_payload() -> list[dict]:
                 payload = []
                 local_max_score = max(rerank_scores) if rerank_scores else 1.0
                 for i, (score, doc) in enumerate(zip(rerank_scores, final_docs), 1):
+                    if score < MIN_RERANK_SCORE:
+                        continue
                     pct = min(score / max(local_max_score, 1e-6), 1.0)
                     payload.append({
                         "rank": i,
@@ -338,12 +390,13 @@ async def chat_stream(req: ChatRequest):
             correction_rounds = 0
             correction_logs: list[dict] = []
 
+            is_pass = _is_pass(verify_result)
             yield _sse("verdict", {
-                "is_pass": "PASS" in verify_result.upper(),
+                "is_pass": is_pass,
                 "verify_result": verify_result
             })
 
-            if req.use_self_correction and "FAIL" in verify_result.upper():
+            if req.use_self_correction and not is_pass:
                 yield _sse("status", {"step": "자동 프롬프트 최적화 시작...", "icon": "🤖"})
                 if ragas_task and not ragas_task.done():
                     ragas_task.cancel()
@@ -355,7 +408,7 @@ async def chat_stream(req: ChatRequest):
                     initial_verify_result=verify_result,
                     openai_api_key=OPENAI_API_KEY,
                     gen_model=req.model,
-                    max_rounds=1,
+                    max_rounds=2,
                     initial_ragas_result=None,
                     embeddings=_resources["embeddings"],
                     final_docs=final_docs,
@@ -371,59 +424,40 @@ async def chat_stream(req: ChatRequest):
                         correction_logs = value["logs"]
 
                 yield _sse("status", {"step": "교정 완료!", "icon": "✅"})
-                total_elapsed = time.time() - total_start
-                yield _sse("done", {
-                    "answer": final_answer,
-                    "is_pass": "PASS" in verify_result.upper(),
-                    "correction_rounds": correction_rounds,
-                    "correction_logs": correction_logs,
-                    "verify_result": verify_result,
-                    "metrics_pending": True,
-                    "ragas": {"faithfulness": 0.0, "answer_relevancy": 0.0},
-                    "docs": docs_payload,
-                    "metrics": {
-                        "search_s": round(search_elapsed, 3),
-                        "rerank_s": round(rerank_elapsed, 3),
-                        "gen_s": round(gen_elapsed, 3),
-                        "verify_s": round(verify_elapsed, 3),
-                        "total_s": round(total_elapsed, 3),
-                        "ensemble_n": len(ensemble_docs),
-                        "final_n": len(final_docs),
-                        **{k: round(float(v), 3) for k, v in search_breakdown.items()},
-                        **{k: round(float(v), 3) for k, v in rerank_breakdown.items()},
-                    },
-                })
-            else:
-                yield _sse("status", {"step": "검증 완료!", "icon": "✅"})
-                total_elapsed_partial = time.time() - total_start
-                yield _sse("done", {
-                    "answer": final_answer,
-                    "is_pass": "PASS" in verify_result.upper() and "FAIL" not in verify_result.upper(),
-                    "correction_rounds": 0,
-                    "correction_logs": [],
-                    "verify_result": verify_result,
-                    "metrics_pending": True,
-                    "ragas": {"faithfulness": 0.0, "answer_relevancy": 0.0},
-                    "docs": docs_payload,
-                    "metrics": {
-                        "search_s": round(search_elapsed, 3),
-                        "rerank_s": round(rerank_elapsed, 3),
-                        "gen_s": round(gen_elapsed, 3),
-                        "verify_s": round(verify_elapsed, 3),
-                        "total_s": round(total_elapsed_partial, 3),
-                        "ensemble_n": len(ensemble_docs),
-                        "final_n": len(final_docs),
-                        **{k: round(float(v), 3) for k, v in search_breakdown.items()},
-                        **{k: round(float(v), 3) for k, v in rerank_breakdown.items()},
-                    },
-                })
 
+            # ── done 이벤트 전송 ──
+            total_elapsed_done = time.time() - total_start
+            done_sent = True
+            yield _sse("done", {
+                "answer": final_answer,
+                "is_pass": _is_pass(verify_result),
+                "correction_rounds": correction_rounds,
+                "correction_logs": correction_logs,
+                "verify_result": verify_result,
+                "metrics_pending": True,
+                "ragas": {"faithfulness": 0.0, "answer_relevancy": 0.0},
+                "docs": docs_payload,
+                "metrics": {
+                    "search_s": round(search_elapsed, 3),
+                    "rerank_s": round(rerank_elapsed, 3),
+                    "gen_s": round(gen_elapsed, 3),
+                    "verify_s": round(verify_elapsed, 3),
+                    "total_s": round(total_elapsed_done, 3),
+                    "ensemble_n": len(ensemble_docs),
+                    "final_n": len(final_docs),
+                    **{k: round(float(v), 3) for k, v in search_breakdown.items()},
+                    **{k: round(float(v), 3) for k, v in rerank_breakdown.items()},
+                },
+            })
+
+            # ── RAGAS 결과 수신 ──
             if ragas_task:
                 try:
                     ragas_results = await ragas_task
                     yield _sse("metrics_update", ragas_results)
-                except Exception as ragas_err:
-                    logger.warning("RAGAS evaluation failed: %s", ragas_err)
+                except BaseException as ragas_err:
+                    logger.warning("RAGAS evaluation failed or cancelled: %s", ragas_err)
+                    yield _sse("metrics_update", {"faithfulness": 0.0, "answer_relevancy": 0.0})
 
         except asyncio.CancelledError:
             logger.info("Chat stream cancelled by client.")
@@ -433,28 +467,31 @@ async def chat_stream(req: ChatRequest):
             logger.exception("Chat error: %s", e)
             total_elapsed_error = time.time() - total_start
             try:
-                yield _sse("done", {
-                    "answer": "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
-                    "is_pass": False,
-                    "correction_rounds": 0,
-                    "correction_logs": [],
-                    "verify_result": f"ERROR: {str(e)}",
-                    "metrics_pending": False,
-                    "ragas": {"faithfulness": 0.0, "answer_relevancy": 0.0},
-                    "docs": docs_payload,
-                    "metrics": {
-                        "search_s": round(search_elapsed, 3),
-                        "rerank_s": round(rerank_elapsed, 3),
-                        "gen_s": round(gen_elapsed, 3),
-                        "verify_s": round(verify_elapsed, 3),
-                        "total_s": round(total_elapsed_error, 3),
-                        "ensemble_n": len(ensemble_docs),
-                        "final_n": len(final_docs),
-                        "error": True,
-                        **{k: round(float(v), 3) for k, v in search_breakdown.items()},
-                        **{k: round(float(v), 3) for k, v in rerank_breakdown.items()},
-                    },
-                })
+                if done_sent:
+                    yield _sse("error", {"message": f"후속 처리 중 오류: {str(e)}"})
+                else:
+                    yield _sse("done", {
+                        "answer": "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                        "is_pass": False,
+                        "correction_rounds": 0,
+                        "correction_logs": [],
+                        "verify_result": f"ERROR: {str(e)}",
+                        "metrics_pending": False,
+                        "ragas": {"faithfulness": 0.0, "answer_relevancy": 0.0},
+                        "docs": docs_payload,
+                        "metrics": {
+                            "search_s": round(search_elapsed, 3),
+                            "rerank_s": round(rerank_elapsed, 3),
+                            "gen_s": round(gen_elapsed, 3),
+                            "verify_s": round(verify_elapsed, 3),
+                            "total_s": round(total_elapsed_error, 3),
+                            "ensemble_n": len(ensemble_docs),
+                            "final_n": len(final_docs),
+                            "error": True,
+                            **{k: round(float(v), 3) for k, v in search_breakdown.items()},
+                            **{k: round(float(v), 3) for k, v in rerank_breakdown.items()},
+                        },
+                    })
             except Exception:
                 pass
         finally:

@@ -28,25 +28,28 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────
 
 _ANSWER_PROMPT_TEMPLATE = """\
-당신은 약법 및 전문 지침을 준수하며 오직 공식 데이터에만 근거하여 답변하는 **전문 약사 AI**입니다.
-말투는 환자 입장에서 이해하기 쉬운 **친절하고 공감적인 한국어**를 사용하되, 사실/근거는 엄격히 지키십시오.
+당신은 공인된 전문 약사입니다.
+제공된 [검색된 문서]에 근거하여 답변하십시오.
 
-━━━ 🚨 엄격 준수 규칙 (절대적) ━━━
-1. **데이터 중심 답변**: 반드시 아래 [검색된 문서]에 명시된 내용만 사용하여 답변하십시오. 문서에 없는 내용은 "제공된 문서에 해당 정보가 없습니다."를 포함해 명확히 알리고, 이어서 **약효/성분 추측 없이** 일반적 관리 팁 또는 추가 질문 유도 문장을 1~3줄 덧붙일 수 있습니다.
-2. **환자 안전 최우선**: 문서에 부작용이나 주의사항이 있다면 반드시 포함하십시오. 일반적인 상식(예: "미지근한 물과 복용")은 조언으로 덧붙일 수 있으나, 약효나 성분에 대한 추측은 절대 금지입니다.
-3. **출처 표기 (필수)**: 정보를 가져온 문장 끝에 반드시 **[문서 N]** 표기를 붙이십시오 (예: ...입니다. [문서 1]).
-4. **허구 인용 금지**: 문서에 없는 내용을 적으면서 허위로 [문서 N] 표기를 붙이는 행위는 허용되지 않습니다.
-━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ 지침:
+1. 모든 답변은 [검색된 문서]에 기재된 내용만 사용하십시오. 문서에 없는 성분명, 용량, 질환명, 상호작용 정보를 직접 추가하거나 추측하지 마십시오.
+2. 문서에 부작용의 강도가 전혀 언급되지 않았다면, 임의로 등급을 매기지 마십시오.
+3. 답변의 각 정보 뒤에 반드시 해당 근거가 된 **[문서 N]**을 표기하십시오.
+4. 근거 문서를 제시하기 전에 "자세한 내용은 전문가와 꼭 상담하세요."라는 문구를 포함하십시오.
+5. 질문에 대한 직접적인 답이 문서에 없더라도, 관련 문서 내용이 있으면 해당 문서 내용을 그대로 인용하여 답변하십시오.
+6. 답변의 첫 문장에서 질문의 핵심 키워드(약품명, 증상명 등)를 포함하여 질문에 직접 답하십시오.
 
 [검색된 문서]
 {context}
 
-질문: {question}
-답변:"""
+[질문]
+{question}
+
+[답변]"""
 
 _VERIFY_PROMPT_TEMPLATE = """\
-당신은 약학 데이터의 무결성을 검증하는 **관대한 감사관**입니다.
-[검증 대상 답변]이 [검색된 문서]의 핵심 내용을 왜곡 없이 반영했는지 평가하십시오.
+당신은 '식품의약품 안전처', 미국 'FDA' 등 공신력 있는 허가 기관의 엄격한 감독관입니다.
+당신의 역할은 전문약사가 작성한 [검증 대상 답변]이 [검색된 문서]의 내용을 바탕으로 **논리적으로 타당한지** 평가하는 것입니다.
 
 [검색된 문서 (Ground Truth)]
 {context}
@@ -57,22 +60,18 @@ _VERIFY_PROMPT_TEMPLATE = """\
 [검증 대상 답변]
 {answer}
 
-━━━ 🚨 FAIL 판정 기준 (치명적 오류만 FAIL) ━━━
-F1. **심각한 성분/용량 오류**: 문서에 없는 약물 성분을 언급하거나, 권장 용량을 임의로 변경한 경우.
-F2. **완전한 허구 인용**: 문서에 전혀 없는 정보를 언급하며 **[문서 N]** 표기를 붙인 경우.
-F3. **검색 문서와 정반대되는 정보**: 문서 내용상 불가한 것을 가능하다고 하는 등 사실 관계 왜곡.
-
-━━━ ✅ PASS 허용 기준 (이런 경우엔 PASS) ━━━
-P1. 환자 안전을 위한 기본 권고(충분한 물, 전문가 상담 등)가 포함된 경우.
-P2. 문맥을 위해 문서의 표현을 소폭 다듬은 경우.
-P3. 핵심 정보의 출처가 명확히 기재된 경우.
+[평가 기준]
+1. 논리적 비약: 문서에 직접적인 단어가 없더라도, 문서 내용으로부터 합리적으로 유추한 것이라면 PASS로 판정하십시오.
+2. 환각(Hallucination): 문서에 전혀 없는 내용을 근거 없이 지어냈을 때만 FAIL로 판정하십시오.
+3. 안전 권고: "전문가와 상담하세요" 등 환자 안전을 위한 기본 권고는 PASS로 허용합니다.
 
 [출력 형식]
-- [분석 코멘트]: (무엇이 틀렸고 어떻게 고쳐야 하는지 구체적으로 기술)
+반드시 아래 형식을 지켜주세요.
+- [분석 코멘트]: (근거와 주장의 연결고리가 타당한지 설명)
 - [최종 판정]: PASS 또는 FAIL"""
 
 _CORRECTION_PROMPT_TEMPLATE = """\
-당신은 검증 피드백을 바탕으로 답변을 수정하는 **전문 약사 AI**입니다.
+당신은 검증 피드백을 바탕으로 답변을 수정하는 **전문 약사**입니다.
 
 [사용자 질문]: {question}
 [검색된 문서]: {context}
@@ -80,7 +79,11 @@ _CORRECTION_PROMPT_TEMPLATE = """\
 [검증 피드백]: {verify_result}
 
 위 피드백을 반영하여 오류를 바로잡고, 다시 최선의 답변을 작성하십시오.
-반드시 [검색된 문서]의 내용에만 집중하고, 수정된 답변만 출력하십시오."""
+주의사항:
+- [검색된 문서]에 관련 정보가 있다면 해당 정보를 활용하여 답변하십시오.
+- 모든 정보 뒤에 [문서 N] 출처를 표기하십시오.
+- "자세한 내용은 전문가와 꼭 상담하세요."를 포함하십시오.
+- 수정된 답변만 출력하십시오."""
 
 _OPTIMIZER_PROMPT_TEMPLATE = """\
 당신은 'RAG 시스템 프롬프트 엔지니어링 전문가'입니다.
@@ -94,14 +97,14 @@ _OPTIMIZER_PROMPT_TEMPLATE = """\
 위의 실패 원인과 지표를 분석하여, 다음 라운드에서 더 정확한 답변을 생성할 수 있도록 수정된 프롬프트 템플릿을 만드십시오.
 - [검색된 문서]의 데이터를 더 정확하게 인용하고 추측을 배제하도록 지시를 강화하세요.
 - 필요하다면 출력 형식이나 주의사항을 구체적으로 조정하세요.
-- 반드시 {context}와 {question} 변수를 포함한 전체 프롬프트 전문만 출력하세요."""
+- 반드시 {{{{context}}}}와 {{{{question}}}} 변수를 포함한 전체 프롬프트 전문만 출력하세요."""
 
 
 # ──────────────────────────────────────────────────────────────────────
 # 컨텍스트 구성
 # ──────────────────────────────────────────────────────────────────────
 
-def build_context(final_docs: list[Document], max_chars: int = 1500) -> str:
+def build_context(final_docs: list[Document], max_chars: int = 1000) -> str:
     """
     최종 선택 문서들을 컨텍스트 문자열로 변환합니다.
 
@@ -211,7 +214,7 @@ async def generate_answer(
     query: str,
     context_text: str,
     openai_api_key: str,
-    model: str = "gpt-5",
+    model: str = "gpt-5.1",
     temperature: float = 0.1,
     prompt_template_str: str = _ANSWER_PROMPT_TEMPLATE,
     stream: bool = False,
@@ -310,7 +313,7 @@ async def self_correction_loop(
     initial_answer: str,
     initial_verify_result: str,
     openai_api_key: str,
-    gen_model: str = "gpt-5",
+    gen_model: str = "gpt-5.1",
     max_rounds: int = 2,
     initial_ragas_result: dict = None,
     embeddings = None,
@@ -323,6 +326,7 @@ async def self_correction_loop(
     os.environ["OPENAI_API_KEY"] = openai_api_key
 
     current_answer = initial_answer
+    last_answer_for_correction = initial_answer
     last_verify_result = initial_verify_result
     last_ragas_result = initial_ragas_result or {"faithfulness": 0.0, "answer_relevancy": 0.0}
     current_template = _ANSWER_PROMPT_TEMPLATE
@@ -339,15 +343,22 @@ async def self_correction_loop(
     ]
 
     for round_num in range(1, max_rounds + 1):
-        # "FAIL"이 없고 "PASS"만 있거나, [최종 판정]이 PASS이면 종료
-        u_verify = last_verify_result.upper()
-        if "FAIL" not in u_verify or "[최종 판정]: PASS" in u_verify:
+        # _is_pass 함수를 사용하여 정확하게 판정
+        import re
+        def _is_pass_check(vr: str) -> bool:
+            m = re.search(r'\[최종\s*판정\]\s*[:：]\s*(PASS|FAIL)', vr, re.IGNORECASE)
+            if m:
+                return m.group(1).upper() == 'PASS'
+            tokens = re.findall(r'\b(PASS|FAIL)\b', vr, re.IGNORECASE)
+            return tokens[-1].upper() == 'PASS' if tokens else False
+        
+        if _is_pass_check(last_verify_result):
             break
 
         # 1. 프롬프트 최적화 (GPT-5.2 사용)
         optimizer_llm = _get_llm(
-            model="gpt-5.2",
-            temperature=0.0,
+            model="gpt-4o-mini",
+            temperature=0.2,
             api_key=openai_api_key,
             streaming=False,
         )
@@ -365,25 +376,31 @@ async def self_correction_loop(
         })
         current_template = new_template
 
-        # 2. 새 프롬프트로 답변 재생성 (스트리밍)
-        yield ("status", {"step": f"최적화된 프롬프트로 재생성 중...", "icon": "✍️"})
-        yield ("token", f"\n\n---\n🔄 **자동 최적화된 답변 ({round_num}회차):**\n\n")
+        # 2. 검증 피드백을 바탕으로 답변 직접 교정 (스트리밍)
+        yield ("status", {"step": f"교정된 답변 재생성 중...", "icon": "✍️"})
+        yield ("token", f"\n\n---\n🔄 **자동 교정된 답변 ({round_num}회차):**\n\n")
+        
+        correction_llm = _get_llm(
+            model=gen_model,
+            temperature=0.1,
+            api_key=openai_api_key,
+            streaming=True,
+        )
+        correction_prompt = PromptTemplate.from_template(_CORRECTION_PROMPT_TEMPLATE)
+        correction_chain = correction_prompt | correction_llm | StrOutputParser()
         
         current_answer = ""
-        async_stream = await generate_answer(
-            query=query,
-            context_text=context_text,
-            openai_api_key=openai_api_key,
-            model=gen_model,
-            prompt_template_str=current_template,
-            stream=True,
-            async_mode=True
-        )
-
-        async for chunk in async_stream:
+        async for chunk in correction_chain.astream({
+            "question": query,
+            "context": context_text,
+            "answer": last_answer_for_correction,
+            "verify_result": last_verify_result,
+        }):
             if chunk:
                 current_answer += chunk
                 yield ("token", chunk)
+        
+        last_answer_for_correction = current_answer
 
         # 3. 재검증 (GPT-5.2)
         yield ("status", {"step": f"교정 답변 검증 중...", "icon": "🧐"})
@@ -437,22 +454,28 @@ def evaluate_with_ragas(
 ) -> dict[str, float]:
     """
     RAGAS로 RAG 파이프라인의 faithfulness와 answer_relevancy를 평가합니다.
-    (사용자 요청에 따라 GPT-5.2 사용 및 Temperature 설정 해제)
+    answer_relevancy 정확도를 위해 OpenAI 임베딩을 사용합니다.
     """
     os.environ["OPENAI_API_KEY"] = openai_api_key
-    # Ragas 0.4.x 이상 데이터셋 규격 준수 (question, answer, contexts)
-    # user_input 대신 question, response 대신 answer, retrieved_contexts 대신 contexts 사용 가능성 확인
+    eval_llm = ChatOpenAI(model=eval_model)
+
+    # answer_relevancy 메트릭은 임베딩 cosine similarity를 사용하므로
+    # 로컬 BGE-M3-ko 대신 OpenAI text-embedding-3-small 사용
+    from langchain_openai import OpenAIEmbeddings
+    ragas_embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+    # LLM과 동일한 문맥 사용: 전체 문서, 문서당 1000자 (build_context와 동일)
     ragas_data = {
         "question": [query],
         "answer": [answer],
         "contexts": [
-            [d.page_content.replace("passage: ", "")[:1500] for d in final_docs]
+            [d.page_content.replace("passage: ", "")[:1000] for d in final_docs]
         ],
     }
+    logger.info("[RAGAS] Input - question: %s", query[:50])
+    logger.info("[RAGAS] Input - answer length: %d, preview: %s", len(answer), answer[:100])
+    logger.info("[RAGAS] Input - contexts count: %d", len(final_docs))
     dataset = Dataset.from_dict(ragas_data)
-    
-    # GPT-5.2 계열은 temperature 설정을 허용하지 않는 경우가 많아 기본값을 사용하게 합니다.
-    eval_llm = ChatOpenAI(model=eval_model)
 
     try:
         results = _retry_api_call(
@@ -461,12 +484,13 @@ def evaluate_with_ragas(
                 metrics=p["metrics"],
                 llm=p["llm"],
                 embeddings=p["embeddings"],
+                raise_exceptions=False,
             ),
             {
                 "dataset": dataset,
                 "metrics": [faithfulness, answer_relevancy],
                 "llm": eval_llm,
-                "embeddings": embeddings,
+                "embeddings": ragas_embeddings,
             }
         )
         df = results.to_pandas()
@@ -483,6 +507,9 @@ def evaluate_with_ragas(
         r_val = _get_metric_val(["relevancy", "relevance"])
 
         import math
+        logger.info("[RAGAS] Raw values: faithfulness=%s (type=%s), answer_relevancy=%s (type=%s)",
+                     f_val, type(f_val).__name__, r_val, type(r_val).__name__)
+
         def _safe(val: float) -> float:
             try:
                 v = float(val)
@@ -490,10 +517,12 @@ def evaluate_with_ragas(
             except Exception:
                 return 0.0
 
-        return {
+        result = {
             "faithfulness": _safe(f_val),
             "answer_relevancy": _safe(r_val),
         }
+        logger.info("[RAGAS] Final scores: %s", result)
+        return result
     except Exception as e:
         logger.error("[RAGAS] Evaluation Error: %s", e)
         return {"faithfulness": 0.0, "answer_relevancy": 0.0}

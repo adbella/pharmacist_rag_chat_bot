@@ -419,7 +419,7 @@ def main() -> None:
     parser.add_argument("--cases", default="eval_cases.json", help="평가 케이스 JSON 경로")
     parser.add_argument("--output-dir", default="outputs/eval_runs", help="출력 상위 디렉터리")
     parser.add_argument("--db-path", default="./chroma_db_combined_1771477980")
-    parser.add_argument("--model", default="gpt-5")
+    parser.add_argument("--model", default="gpt-5.1")
     parser.add_argument("--eval-model", default="gpt-5.2")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--ensemble-k", type=int, default=20)

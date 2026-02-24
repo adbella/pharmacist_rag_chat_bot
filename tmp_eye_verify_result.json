@@ -1,8 +1,0 @@
-{
-  "server_ready": false,
-  "health": null,
-  "chat_http": null,
-  "statuses": [],
-  "done": null,
-  "error": "server_not_ready"
-}
