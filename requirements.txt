@@ -39,6 +39,9 @@ numpy>=1.26.0
 pandas>=2.2.0
 python-dotenv>=1.0.0
 
+# 웹 검색 (동적 참조)
+tavily-python>=0.5.0
+
 # GPU (RTX 2070 – CUDA 12.1 기준)
 # 아래 커맨드로 CUDA 버전 PyTorch를 먼저 설치하세요:
 #   pip install torch>=2.3.0 --index-url https://download.pytorch.org/whl/cu121

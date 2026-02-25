@@ -80,6 +80,9 @@ function renderMarkdown(text) {
     let html = text
         // escape
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        // doc refs — make [문서 N] clickable, line break only before first in sequence
+        .replace(/\[문서\s*(\d+)\]/g, '<span class="doc-ref" data-ref="$1" onclick="docRefClick(this, $1)">[문서 $1]</span>')
+        .replace(/(?<!\<\/span\>)(\<span class="doc-ref")/g, '<br>$1')
         // bold
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         // italic
@@ -360,9 +363,12 @@ function initTabs(metaEl) {
 ══════════════════════════════════════════════════════════ */
 function renderDocs(panel, docs) {
     panel.innerHTML = '';
+    panel._docsData = docs;
     docs.forEach(doc => {
         const card = document.createElement('div');
-        card.className = 'source-card';
+        card.className = 'source-card source-card-clickable';
+        card.setAttribute('data-doc-rank', doc.rank);
+        card.onclick = () => openDocModal(doc);
         card.innerHTML = `
       <div class="source-card-header">
         <span class="source-rank">#${doc.rank}</span>
@@ -372,9 +378,77 @@ function renderDocs(panel, docs) {
       <div class="source-bar-wrap">
         <div class="source-bar-fill" style="width:${doc.pct}%"></div>
       </div>
-      <div class="source-preview">${doc.preview}${doc.preview.length >= 280 ? '…' : ''}</div>`;
+      <div class="source-preview">${doc.preview}${doc.preview.length >= 280 ? '…' : ''}</div>
+      <div class="source-card-hint">클릭하여 전체 내용 보기</div>`;
         panel.appendChild(card);
     });
+}
+
+/* ══════════════════════════════════════════════════════════
+   Document Preview Modal
+══════════════════════════════════════════════════════════ */
+function openDocModal(doc) {
+    const modal = $('docModal');
+    $('docModalRank').textContent = `#${doc.rank}`;
+    $('docModalTitle').textContent = `문서 ${doc.rank}`;
+    $('docModalScore').textContent = `점수: ${doc.score.toFixed(4)}`;
+    $('docModalSource').textContent = `출처: ${doc.source}`;
+
+    const content = doc.content || doc.preview || '';
+    $('docModalBody').innerHTML = content
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeDocModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    $('docModal').classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$('docModal').classList.contains('hidden')) {
+        closeDocModal();
+    }
+});
+
+/* ══════════════════════════════════════════════════════════
+   Document Reference Click Handler — opens modal
+══════════════════════════════════════════════════════════ */
+function docRefClick(el, rank) {
+    const msg = el.closest('.msg');
+    if (!msg) return;
+
+    // Try to find doc data from panel._docsData or msg._docsData
+    const metaEl = msg.querySelector('.msg-meta');
+    const docsPanel = metaEl?.querySelector('[data-panel="docs"]');
+    const docsData = docsPanel?._docsData || msg._docsData;
+
+    if (docsData) {
+        const doc = docsData.find(d => d.rank === rank);
+        if (doc) {
+            openDocModal(doc);
+            return;
+        }
+    }
+
+    // Fallback: switch to docs tab
+    if (metaEl && !metaEl.classList.contains('hidden')) {
+        const btns = metaEl.querySelectorAll('.tab-btn');
+        btns.forEach(b => b.classList.toggle('active', b.dataset.tab === 'docs'));
+        metaEl.querySelectorAll('.tab-content').forEach(p => {
+            p.classList.toggle('hidden', p.dataset.panel !== 'docs');
+        });
+        const targetCard = docsPanel?.querySelector(`[data-doc-rank="${rank}"]`);
+        if (targetCard) {
+            targetCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            targetCard.classList.add('doc-highlight');
+            setTimeout(() => targetCard.classList.remove('doc-highlight'), 2000);
+        }
+    }
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -499,6 +573,40 @@ function escHtml(str) {
 }
 
 /* ══════════════════════════════════════════════════════════
+   Render web refs tab (external reference links only)
+══════════════════════════════════════════════════════════ */
+function renderWebRefs(panel, refs) {
+    if (!refs || refs.length === 0) {
+        panel.innerHTML = `<div style="font-size:.82rem;color:var(--text-muted);padding:.5rem 0">
+      🌐 관련 웹 검색 결과가 없습니다.</div>`;
+        return;
+    }
+    panel.innerHTML = `<div class="web-ref-warning">⚠️ 이 내용은 검증되지 않은 외부 검색 결과입니다. 답변 생성·검증·RAGAS 평가에 사용되지 않습니다.</div>
+    <div style="font-size:.72rem;font-weight:600;color:var(--text-muted);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em">
+    🌐 외부 참고 링크 (참고용)</div>`;
+    refs.forEach(ref => {
+        const card = document.createElement('a');
+        card.className = 'web-ref-card';
+        card.href = ref.url;
+        card.target = '_blank';
+        card.rel = 'noopener noreferrer';
+        const domain = new URL(ref.url).hostname.replace('www.', '');
+        card.innerHTML = `
+      <div class="web-ref-title">${escHtml(ref.title || '제목 없음')}</div>
+      <div class="web-ref-snippet">${escHtml(ref.snippet || '')}</div>
+      <div class="web-ref-url">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          <polyline points="15 3 21 3 21 9"/>
+          <line x1="10" y1="14" x2="21" y2="3"/>
+        </svg>
+        ${escHtml(domain)}
+      </div>`;
+        panel.appendChild(card);
+    });
+}
+
+/* ══════════════════════════════════════════════════════════
    Clear Chat
 ══════════════════════════════════════════════════════════ */
 function clearChat() {
@@ -570,6 +678,7 @@ async function sendMessage() {
                 ensemble_k: 20,
                 weight_bm25: parseInt(bm25Slider.value) / 100,
                 use_self_correction: selfCorrEnabled,
+                long_answer: !!document.getElementById('longAnswerCheck')?.checked,
             };
 
             const res = await fetch(`${API_BASE}/chat`, {
@@ -605,7 +714,11 @@ async function sendMessage() {
                         const raw = line.slice(6).trim();
                         try {
                             const payload = JSON.parse(raw);
-                            handleSSE(eventType, payload, streamState);
+                            try {
+                                handleSSE(eventType, payload, streamState);
+                            } catch (sseErr) {
+                                console.error(`SSE handler error (${eventType}):`, sseErr);
+                            }
                             // 상태 변화가 있을 때 VRAM 즉시 폴링
                             if (eventType === 'status' || eventType === 'done') pollVRAM();
                         } catch {/* skip bad JSON */ }
@@ -652,14 +765,25 @@ function handleSSE(type, payload, state) {
             // Update global status text
             setStatus(payload.icon, payload.step);
             if (!state.tokenBuffer && !state.metricsPending) {
-                showMetricsOverlay(payload.step);
+                if (payload.progress !== undefined) {
+                    showMetricsOverlay(`${payload.step} (${payload.progress}%)`);
+                } else {
+                    showMetricsOverlay(payload.step);
+                }
             }
             // Hide thinking dots when specific status arrives
             if (dotsEl) dotsEl.classList.add('hidden');
-            // Update in-bubble status
+            // Update in-bubble status with optional progress bar
             if (stepIndEl && stepTextEl) {
                 stepIndEl.classList.remove('hidden');
-                stepTextEl.textContent = `${payload.icon} ${payload.step}`;
+                if (payload.progress !== undefined) {
+                    stepTextEl.innerHTML = `${payload.icon} ${payload.step}
+                        <div class="ragas-progress-wrap">
+                            <div class="ragas-progress-bar" style="width:${payload.progress}%"></div>
+                        </div>`;
+                } else {
+                    stepTextEl.textContent = `${payload.icon} ${payload.step}`;
+                }
             }
             break;
 
@@ -726,65 +850,95 @@ function handleSSE(type, payload, state) {
             break;
 
         case 'done': {
-            // Hide progress indicators when DONE
-            if (stepIndEl) stepIndEl.classList.add('hidden');
-            dotsEl.classList.add('hidden');
-            clearStatus();
+            // Store docs data on the message element for [문서 N] click access
+            const _doneDocs = payload.docs || [];
+            const _doneEl = textEl?.closest?.('.msg');
+            if (_doneEl) _doneEl._docsData = _doneDocs;
 
-            // Final answer (might differ if self-correction ran)
-            if (payload.answer) {
-                textEl.innerHTML = renderMarkdown(payload.answer);
+            try {
+                // Final answer (might differ if self-correction ran)
+                if (payload.answer) {
+                    try {
+                        textEl.innerHTML = renderMarkdown(payload.answer);
+                    } catch (renderErr) {
+                        console.error('renderMarkdown error in done:', renderErr);
+                        textEl.textContent = payload.answer; // fallback: plain text
+                    }
+                }
+
+                // Verdict badge
+                const isPass = payload.is_pass;
+                const rounds = payload.correction_rounds;
+                const roundText = rounds > 0 ? ` <span class="verdict-rounds">(교정 ${rounds}회 후)</span>` : '';
+                verdictEl.innerHTML = `
+                    <span class="verdict-badge ${isPass ? 'pass' : 'fail'}">
+                        ${isPass ? '✅' : '⚠️'} 검증 ${isPass ? 'PASS' : 'FAIL'}${roundText}
+                    </span>`;
+
+                // State
+                state.lastDocs = _doneDocs;
+                state.lastMetrics = payload.metrics || {};
+                state.lastVerifyResult = payload.verify_result || '';
+                state.metricsPending = !!payload.metrics_pending;
+
+                // Render tabs content
+                const docsPanel = metaEl.querySelector('[data-panel="docs"]');
+                const perfPanel = metaEl.querySelector('[data-panel="perf"]');
+                const logPanel = metaEl.querySelector('[data-panel="log"]');
+
+                if (docsPanel) renderDocs(docsPanel, _doneDocs);
+                if (perfPanel) renderPerf(perfPanel, state.lastMetrics, state.lastVerifyResult, payload.ragas);
+                if (logPanel) renderLog(logPanel, payload.correction_logs, payload.is_pass);
+
+                // Sidebar sync
+                if (payload.ragas) {
+                    const fVal = payload.ragas.faithfulness || 0;
+                    const rVal = payload.ragas.answer_relevancy || 0;
+                    if ($('valFaithfulness')) {
+                        $('valFaithfulness').textContent = fVal.toFixed(2);
+                        $('barFaithfulness').style.width = (fVal * 100) + '%';
+                    }
+                    if ($('valRelevancy')) {
+                        $('valRelevancy').textContent = rVal.toFixed(2);
+                        $('barRelevancy').style.width = (rVal * 100) + '%';
+                    }
+                }
+
+                // Tab labels
+                const docTab = metaEl.querySelector('[data-tab="docs"]');
+                if (docTab) docTab.textContent = `📄 참고 문서 (${_doneDocs.length})`;
+                const logTab = metaEl.querySelector('[data-tab="log"]');
+                if (logTab) logTab.textContent = `🔄 교정 로그 (${payload.correction_rounds || 0})`;
+            } catch (doneErr) {
+                console.error('Done handler error:', doneErr);
+            } finally {
+                // ALWAYS execute: ensure UI is never stuck
+                if (stepIndEl) stepIndEl.classList.add('hidden');
+                dotsEl.classList.add('hidden');
+                clearStatus();
+                metaEl.classList.remove('hidden');
+                initTabs(metaEl);
+
+                if (state.metricsPending) {
+                    showMetricsOverlay('답변은 완료! 이제 RAGAS/성능 지표를 계산 중입니다…');
+                    setStatus('📊', '성능 지표 계산 중...');
+                } else {
+                    hideMetricsOverlay();
+                }
+                scrollToBottom();
             }
-
-            // Verdict badge (교정 로그 포함용 업데이트)
-            const isPass = payload.is_pass;
-            const rounds = payload.correction_rounds;
-            const roundText = rounds > 0 ? ` <span class="verdict-rounds">(교정 ${rounds}회 후)</span>` : '';
-            verdictEl.innerHTML = `
-                <span class="verdict-badge ${isPass ? 'pass' : 'fail'}">
-                    ${isPass ? '✅' : '⚠️'} 검증 ${isPass ? 'PASS' : 'FAIL'}${roundText}
-                </span>`;
-
-            // Build tabs
-            metaEl.classList.remove('hidden');
-            initTabs(metaEl);
-
-            const docsPanel = metaEl.querySelector('[data-panel="docs"]');
-            const perfPanel = metaEl.querySelector('[data-panel="perf"]');
-            const logPanel = metaEl.querySelector('[data-panel="log"]');
-
-            state.lastMetrics = payload.metrics || {};
-            state.lastVerifyResult = payload.verify_result || '';
-            state.metricsPending = !!payload.metrics_pending;
-
-            renderDocs(docsPanel, payload.docs || []);
-            renderPerf(perfPanel, state.lastMetrics, state.lastVerifyResult, payload.ragas);
-            renderLog(logPanel, payload.correction_logs, isPass);
-
-            if (state.metricsPending) {
-                showMetricsOverlay('답변은 완료! 이제 RAGAS/성능 지표를 계산 중입니다…');
-                setStatus('📊', '성능 지표 계산 중...');
-            } else {
-                hideMetricsOverlay();
+            break;
+        }
+        case 'web_refs': {
+            // 웹 참고 링크 — 탭에만 표시 (답변 영역에 표시하지 않음)
+            if (payload.refs && payload.refs.length > 0) {
+                const webPanel = metaEl.querySelector('[data-panel="web"]');
+                if (webPanel) {
+                    renderWebRefs(webPanel, payload.refs);
+                    const webTab = metaEl.querySelector('[data-tab="web"]');
+                    if (webTab) webTab.textContent = `🌐 웹 참고 (${payload.refs.length})`;
+                }
             }
-
-            // 최종 지표 동기화
-            if (payload.ragas) {
-                const fVal = payload.ragas.faithfulness || 0;
-                const rVal = payload.ragas.answer_relevancy || 0;
-                $('valFaithfulness').textContent = fVal.toFixed(2);
-                $('barFaithfulness').style.width = (fVal * 100) + '%';
-                $('valRelevancy').textContent = rVal.toFixed(2);
-                $('barRelevancy').style.width = (rVal * 100) + '%';
-            }
-
-            // Update tab label
-            const docTab = metaEl.querySelector('[data-tab="docs"]');
-            if (docTab) docTab.textContent = `📄 참고 문서 (${(payload.docs || []).length})`;
-            const logTab = metaEl.querySelector('[data-tab="log"]');
-            if (logTab) logTab.textContent = `🔄 교정 로그 (${payload.correction_rounds || 0})`;
-
-            scrollToBottom();
             break;
         }
         case 'error':

@@ -325,6 +325,12 @@
 
       <!-- Input area -->
       <div class="input-area">
+        <div class="input-options">
+          <label class="long-answer-toggle" title="체크 시 더 상세한 답변을 생성합니다">
+            <input type="checkbox" id="longAnswerCheck" />
+            <span class="long-answer-label">📝 긴 답변</span>
+          </label>
+        </div>
         <div class="input-wrap">
           <textarea id="queryInput" class="query-input" placeholder="약에 대해 궁금한 것을 물어보세요… (예: 눈이 침침한데 뭐 먹으면 될까요?)"
             rows="1"></textarea>
@@ -376,14 +382,39 @@
             <button class="tab-btn active" data-tab="docs">📄 참고 문서</button>
             <button class="tab-btn" data-tab="perf">📊 성능 지표</button>
             <button class="tab-btn" data-tab="log">🔄 교정 로그</button>
+            <button class="tab-btn" data-tab="web">🌐 웹 참고</button>
           </div>
           <div class="tab-content" data-panel="docs"></div>
           <div class="tab-content hidden" data-panel="perf"></div>
           <div class="tab-content hidden" data-panel="log"></div>
+          <div class="tab-content hidden" data-panel="web"></div>
         </div>
       </div>
     </div>
   </template>
+
+  <!-- ═══════════════════════════════════════════════ DOCUMENT MODAL ═ -->
+  <div id="docModal" class="doc-modal hidden" onclick="closeDocModal(event)">
+    <div class="doc-modal-card" onclick="event.stopPropagation()">
+      <div class="doc-modal-header">
+        <div class="doc-modal-title-wrap">
+          <span class="doc-modal-rank" id="docModalRank">#1</span>
+          <span class="doc-modal-title" id="docModalTitle">문서</span>
+        </div>
+        <button class="doc-modal-close" onclick="closeDocModal()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="doc-modal-meta">
+        <span class="doc-modal-badge" id="docModalScore">점수: 0.000</span>
+        <span class="doc-modal-badge" id="docModalSource">출처: —</span>
+      </div>
+      <div class="doc-modal-body" id="docModalBody"></div>
+    </div>
+  </div>
 
   <script src="/static/app_v31.js"></script>
 </body>

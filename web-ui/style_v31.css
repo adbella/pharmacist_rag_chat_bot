@@ -2167,3 +2167,346 @@ body.ui-ready .app-shell {
 .topbar {
   backdrop-filter: blur(18px) saturate(1.3);
 }
+
+/* ── Web Reference Cards (Dynamic External Links) ────────── */
+.web-ref-card {
+  display: block;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.5rem;
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.7), rgba(12, 18, 30, 0.55));
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color var(--dur-slow), background var(--dur-slow), transform var(--dur) var(--ease-spring), box-shadow var(--dur-slow);
+  cursor: pointer;
+}
+
+.web-ref-card:hover {
+  border-color: var(--blue-border);
+  background: rgba(59, 130, 246, 0.06);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.08);
+}
+
+.web-ref-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--blue);
+  margin-bottom: 0.25rem;
+  line-height: 1.4;
+}
+
+.web-ref-snippet {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 0.35rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.web-ref-url {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.web-ref-url svg {
+  color: var(--text-muted);
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+/* ── Clickable Document References [문서 N] ─────────────── */
+.doc-ref {
+  display: inline-block;
+  color: var(--blue);
+  font-weight: 600;
+  font-size: 0.82em;
+  background: var(--blue-muted);
+  border: 1px solid var(--blue-border);
+  border-radius: 5px;
+  padding: 0 5px;
+  cursor: pointer;
+  transition: background var(--dur), transform var(--dur), box-shadow var(--dur);
+  vertical-align: baseline;
+}
+
+.doc-ref:hover {
+  background: rgba(59, 130, 246, 0.18);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
+}
+
+/* Flash highlight for targeted source card */
+.source-card.doc-highlight {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 2px var(--blue-muted), 0 4px 16px rgba(59, 130, 246, 0.15) !important;
+  animation: docFlash 0.6s ease-out;
+}
+
+@keyframes docFlash {
+  0% {
+    background: rgba(59, 130, 246, 0.2);
+  }
+
+  100% {
+    background: transparent;
+  }
+}
+
+/* ── Clickable Source Cards ───────────────────────────────── */
+.source-card-clickable {
+  cursor: pointer;
+  transition: border-color var(--dur-slow), transform var(--dur) var(--ease-spring), box-shadow var(--dur-slow);
+}
+
+.source-card-clickable:hover {
+  border-color: var(--blue-border);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.1);
+}
+
+.source-card-hint {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  text-align: right;
+  margin-top: 0.35rem;
+  opacity: 0;
+  transition: opacity var(--dur-slow);
+}
+
+.source-card-clickable:hover .source-card-hint {
+  opacity: 1;
+}
+
+/* ── Document Preview Modal ──────────────────────────────── */
+.doc-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 8, 23, 0.7);
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.doc-modal.hidden {
+  display: none;
+}
+
+.doc-modal-card {
+  width: min(640px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.97), rgba(10, 18, 32, 0.95));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  box-shadow: 0 32px 64px rgba(2, 8, 23, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  animation: modalSlideUp 0.3s var(--ease-spring);
+  overflow: hidden;
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.doc-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem 0.6rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.doc-modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.doc-modal-rank {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--blue);
+  background: var(--blue-muted);
+  border: 1px solid var(--blue-border);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.doc-modal-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.doc-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all var(--dur);
+  display: flex;
+  align-items: center;
+}
+
+.doc-modal-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.doc-modal-meta {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+}
+
+.doc-modal-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.doc-modal-body {
+  padding: 1rem 1.25rem 1.25rem;
+  overflow-y: auto;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* ── RAGAS Progress Bar ──────────────────────────────────── */
+.ragas-progress-wrap {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-overlay);
+  border-radius: 2px;
+  margin-top: 0.4rem;
+  overflow: hidden;
+}
+
+.ragas-progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--blue), hsl(200, 90%, 55%));
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+  transition: width 1s var(--ease);
+}
+
+/* ── Web Ref Warning Banner ──────────────────────────────── */
+.web-ref-warning {
+  font-size: 0.68rem;
+  color: hsl(45, 90%, 65%);
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.6rem;
+  line-height: 1.5;
+}
+
+/* ── Inline Web Search Section (below answer) ────────────── */
+.web-inline-section {
+  margin-top: 0.5rem;
+}
+
+.web-inline-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+  margin: 0.8rem 0;
+}
+
+.web-inline-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+  letter-spacing: 0.03em;
+}
+
+/* ── Long Answer Toggle ──────────────────────────────────── */
+.input-options {
+  display: flex;
+  align-items: center;
+  padding: 0 0.4rem 0.3rem;
+}
+
+.long-answer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  transition: background 0.2s var(--ease);
+}
+
+.long-answer-toggle:hover {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.long-answer-toggle input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s var(--ease);
+}
+
+.long-answer-toggle input[type="checkbox"]:checked {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.long-answer-toggle input[type="checkbox"]:checked::after {
+  content: '✓';
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.long-answer-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  transition: color 0.2s var(--ease);
+}
+
+.long-answer-toggle:has(input:checked) .long-answer-label {
+  color: var(--blue);
+  font-weight: 600;
+}

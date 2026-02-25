@@ -14,6 +14,12 @@ import asyncio
 import logging
 from typing import AsyncGenerator
 
+try:
+    from tavily import TavilyClient
+    _TAVILY_AVAILABLE = True
+except ImportError:
+    _TAVILY_AVAILABLE = False
+
 import torch
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +50,7 @@ from generator import (
     self_correction_loop,
     get_query_optimizer,
     evaluate_with_ragas,
+    get_answer_prompt,
 )
 from processor import clear_gpu, get_gpu_status
 
@@ -81,6 +88,9 @@ USE_QUERY_OPTIMIZER = os.getenv("USE_QUERY_OPTIMIZER", "true").lower() in {"1", 
 VERIFY_MODEL = os.getenv("VERIFY_MODEL", "gpt-5.2")
 RAGAS_MODEL = os.getenv("RAGAS_MODEL", "gpt-5.2")
 RERANK_BATCH_SIZE = max(1, int(os.getenv("RERANK_BATCH_SIZE", "32")))
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+WEB_SEARCH_ENABLED = os.getenv("WEB_SEARCH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
 
 _resources: dict = {}
 _init_done = False
@@ -111,6 +121,31 @@ def _load_all_resources():
     _log_init("모든 리소스 준비 완료!")
 
 
+def _web_search(query: str) -> list[dict]:
+    """Tavily 웹 검색 — 참고 링크용 (context에 포함하지 않음)."""
+    if not _TAVILY_AVAILABLE or not TAVILY_API_KEY or not WEB_SEARCH_ENABLED:
+        return []
+    try:
+        client = TavilyClient(api_key=TAVILY_API_KEY)
+        results = client.search(
+            query=f"{query} 약물 의약품 복용",
+            search_depth="basic",
+            max_results=WEB_SEARCH_MAX_RESULTS,
+        )
+        refs = []
+        for r in results.get("results", []):
+            refs.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "snippet": (r.get("content", "") or "")[:150],
+            })
+        logger.info("웹 검색 완료: %d건", len(refs))
+        return refs
+    except Exception as e:
+        logger.warning("웹 검색 실패: %s", e)
+        return []
+
+
 class ChatRequest(BaseModel):
     query: str
     model: str = "gpt-5.1"
@@ -118,6 +153,7 @@ class ChatRequest(BaseModel):
     ensemble_k: int = 20
     weight_bm25: float = 0.8
     use_self_correction: bool = True
+    long_answer: bool = False
 
 
 @app.get("/health")
@@ -156,6 +192,7 @@ async def chat_stream(req: ChatRequest):
         done_sent = False
         verify_task = None
         ragas_task = None
+        web_search_task = None
         search_elapsed = 0.0
         rerank_elapsed = 0.0
         gen_elapsed = 0.0
@@ -281,6 +318,7 @@ async def chat_stream(req: ChatRequest):
                         "score": round(float(score), 4),
                         "pct": round(float(pct) * 100, 1),
                         "preview": doc.page_content.replace("passage: ", "").replace("\n", " ")[:280],
+                        "content": doc.page_content.replace("passage: ", "")[:1500],
                     })
                 return payload
 
@@ -333,15 +371,26 @@ async def chat_stream(req: ChatRequest):
                 return
 
             context_text = build_context(final_docs)
+
+            # 웹 검색을 답변 생성과 병렬로 시작 (context에 포함하지 않음, 링크만 제공)
+            async def _run_web_search():
+                return await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: _web_search(req.query)
+                )
+            if WEB_SEARCH_ENABLED and TAVILY_API_KEY:
+                web_search_task = asyncio.create_task(_run_web_search())
+
             yield _sse("status", {"step": "답변 생성 중...", "icon": "✍️"})
             gen_start = time.time()
 
             initial_answer = ""
+            answer_prompt = get_answer_prompt(req.long_answer)
             async_stream = await generate_answer(
                 query=req.query,
                 context_text=context_text,
                 openai_api_key=OPENAI_API_KEY,
                 model=req.model,
+                prompt_template_str=answer_prompt,
                 stream=True,
                 async_mode=True,
             )
@@ -409,7 +458,7 @@ async def chat_stream(req: ChatRequest):
                     initial_verify_result=verify_result,
                     openai_api_key=OPENAI_API_KEY,
                     gen_model=req.model,
-                    max_rounds=2,
+                    max_rounds=3,
                     initial_ragas_result=None,
                     embeddings=_resources["embeddings"],
                     final_docs=final_docs,
@@ -426,7 +475,53 @@ async def chat_stream(req: ChatRequest):
 
                 yield _sse("status", {"step": "교정 완료!", "icon": "✅"})
 
-            # ── done 이벤트 전송 ──
+            # ── 교정 시 RAGAS 재실행 (교정된 답변 기준) ──
+            if correction_rounds > 0:
+                # 교정이 발생했으면 기존 ragas_task 취소, 교정된 답변으로 재평가
+                if ragas_task and not ragas_task.done():
+                    ragas_task.cancel()
+
+                async def _run_ragas_corrected():
+                    return await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: evaluate_with_ragas(
+                            query=req.query,
+                            answer=final_answer,
+                            final_docs=final_docs,
+                            embeddings=_resources["embeddings"],
+                            openai_api_key=OPENAI_API_KEY,
+                            eval_model=RAGAS_MODEL,
+                        )
+                    )
+                ragas_task = asyncio.create_task(_run_ragas_corrected())
+
+            # ── RAGAS 결과 대기 (동기 — heartbeat로 연결 유지) ──
+            yield _sse("status", {"step": "RAGAS 성능 평가 중...", "icon": "📊", "progress": 0})
+            ragas_results = {"faithfulness": 0.0, "answer_relevancy": 0.0}
+            ragas_start = time.time()
+            RAGAS_EXPECTED_SECS = 80.0  # 예상 소요 시간
+            if ragas_task and not ragas_task.cancelled():
+                try:
+                    while not ragas_task.done():
+                        await asyncio.sleep(5.0)
+                        ragas_elapsed = time.time() - ragas_start
+                        total_elapsed = time.time() - total_start
+                        pct = min(int((ragas_elapsed / RAGAS_EXPECTED_SECS) * 95), 95)
+                        yield _sse("status", {
+                            "step": f"RAGAS 평가 진행 중... ({total_elapsed:.0f}초)",
+                            "icon": "📊",
+                            "progress": pct,
+                        })
+                    ragas_results = ragas_task.result()
+                    logger.info("RAGAS 동기 평가 완료: %s", ragas_results)
+                    yield _sse("status", {"step": "RAGAS 평가 완료!", "icon": "✅", "progress": 100})
+                except asyncio.CancelledError:
+                    logger.info("RAGAS task cancelled (client disconnected)")
+                    raise
+                except Exception as ragas_err:
+                    logger.warning("RAGAS evaluation failed: %s", ragas_err)
+
+            # ── done 이벤트 전송 (RAGAS 점수 포함) ──
             total_elapsed_done = time.time() - total_start
             done_sent = True
             yield _sse("done", {
@@ -435,8 +530,8 @@ async def chat_stream(req: ChatRequest):
                 "correction_rounds": correction_rounds,
                 "correction_logs": correction_logs,
                 "verify_result": verify_result,
-                "metrics_pending": True,
-                "ragas": {"faithfulness": 0.0, "answer_relevancy": 0.0},
+                "metrics_pending": False,
+                "ragas": ragas_results,
                 "docs": docs_payload,
                 "metrics": {
                     "search_s": round(search_elapsed, 3),
@@ -451,25 +546,16 @@ async def chat_stream(req: ChatRequest):
                 },
             })
 
-            # ── RAGAS 결과 수신 (shield: 클라이언트 연결이 끊겨도 태스크는 완료까지 실행) ──
-            if ragas_task and not ragas_task.done() and not ragas_task.cancelled():
+            # ── 웹 검색 결과 수신 (참고 링크용, context에 미포함) ──
+            if web_search_task and not web_search_task.cancelled():
                 try:
-                    ragas_results = await asyncio.shield(ragas_task)
-                    yield _sse("metrics_update", ragas_results)
-                except asyncio.CancelledError:
-                    # 현재 요청이 취소됐지만 ragas_task 자체는 계속 실행 중 — 결과는 버림
-                    logger.info("RAGAS await cancelled (client disconnected), task continues in background.")
-                    raise
-                except Exception as ragas_err:
-                    logger.warning("RAGAS evaluation failed: %s", ragas_err)
-                    yield _sse("metrics_update", {"faithfulness": 0.0, "answer_relevancy": 0.0})
-            elif ragas_task and ragas_task.done() and not ragas_task.cancelled():
-                try:
-                    ragas_results = ragas_task.result()
-                    yield _sse("metrics_update", ragas_results)
-                except Exception as ragas_err:
-                    logger.warning("RAGAS result error: %s", ragas_err)
-                    yield _sse("metrics_update", {"faithfulness": 0.0, "answer_relevancy": 0.0})
+                    web_refs = await asyncio.wait_for(web_search_task, timeout=5.0)
+                    if web_refs:
+                        yield _sse("web_refs", {"refs": web_refs})
+                except asyncio.TimeoutError:
+                    logger.warning("웹 검색 타임아웃 (5초)")
+                except Exception as web_err:
+                    logger.warning("웹 검색 결과 수신 실패: %s", web_err)
 
         except asyncio.CancelledError:
             logger.info("Chat stream cancelled by client.")
