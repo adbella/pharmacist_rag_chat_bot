@@ -5,7 +5,7 @@
 5. WEB_SEARCH_ENABLED=true
 6. WEB_SEARCH_MAX_RESULTS=5
    
-8. ==== 아래 링크에서 다운받고 깃파일 폴더에 넣으세요 =====
+8. ==== 아래 링크에서 폴더 전체를 다운받고 깃파일 폴더에 넣으세요 =====
    
 10. https://drive.google.com/drive/folders/1hl8hHsRAcUd3AVUK-Tibb6yESouYPvXx?usp=sharing
 11. DB Data chroma_db_combined_... 폴더 (로컬 데이터베이스)
